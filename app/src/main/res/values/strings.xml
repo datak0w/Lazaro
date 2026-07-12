@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lazaro</string>
+    <string name="assistant_listening">Escuchando</string>
+    <string name="assistant_thinking">Pensando</string>
+    <string name="assistant_speaking">Hablando</string>
+    <string name="assistant_idle">Inactivo</string>
+    <string name="assistant_error">Error de voz</string>
+    <string name="notification_channel_name">Asistente Lazaro</string>
+    <string name="notification_channel_desc">Mantiene el asistente de voz activo</string>
+    <string name="notification_title">Lazaro activo</string>
+    <string name="notification_text">Asistente de voz en ejecución</string>
+    <string name="permission_mic_rationale">Lazaro necesita el micrófono para escucharte.</string>
+    <string name="permission_location_rationale">Lazaro usa tu ubicación para navegar y decirte dónde estás.</string>
+    <string name="start_assistant">Iniciar</string>
+    <string name="stop_assistant">Detener</string>
+    <string name="stop_app">Parar app</string>
+    <string name="wake_word_hint">Siempre escuchando. Di Lazaro y tu comando</string>
+    <string name="tap_to_interrupt">Toca la pantalla para hablar sin decir Lazaro</string>
+    <string name="you_said">Has dicho: %1$s</string>
+    <string name="status_label">Estado del asistente</string>
+    <string name="last_response_label">Última respuesta</string>
+    <string name="api_key_missing">Configura GEMINI_API_KEY en local.properties</string>
+    <string name="manage_memory">Gestionar memoria</string>
+    <string name="memory_title">Memoria de Lazaro</string>
+    <string name="delete_item">Eliminar</string>
+    <string name="notifications_enabled">Acceso a notificaciones activado. Lazaro puede leer WhatsApp.</string>
+    <string name="notifications_disabled">Acceso a notificaciones desactivado. Actívalo para leer WhatsApp.</string>
+    <string name="enable_notifications">Activar acceso a notificaciones</string>
+    <string name="permissions_section_title">Permisos del asistente</string>
+    <string name="notifications_permission_title">Notificaciones WhatsApp</string>
+    <string name="accessibility_permission_title">Accesibilidad WhatsApp</string>
+    <string name="accessibility_enabled">Accesibilidad activada. Lazaro puede pulsar Enviar en WhatsApp.</string>
+    <string name="accessibility_disabled">Accesibilidad desactivada. Actívala para enviar respuestas por dictado.</string>
+    <string name="enable_accessibility">Activar accesibilidad</string>
+    <string name="accessibility_service_description">Lazaro pulsa Enviar en WhatsApp cuando respondes por dictado.</string>
+</resources>
