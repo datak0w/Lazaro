@@ -18,7 +18,8 @@ class NavigationSessionManager @Inject constructor(
 ) {
     fun isNavigationActive(): Boolean {
         return navigationGuidanceMonitor.isNavigationActive() ||
-            pathGuideController.currentMode() == PathGuideMode.NAVEGACION
+            pathGuideController.currentMode() == PathGuideMode.NAVEGACION ||
+            pathGuideController.currentMode() == PathGuideMode.RUTA
     }
 
     fun startSession() {

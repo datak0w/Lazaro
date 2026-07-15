@@ -1,309 +1,497 @@
-# Lázaro
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
 
-**Asistente de voz en Android diseñado para personas ciegas y con baja visión.**
+<p align="center">
+  <img src="docs/lazaro-ai-hero.png" alt="Lazaro AI — asistente de voz libre para la comunidad ciega" width="720">
+</p>
 
-Lázaro es un compañero de voz en español que funciona por completo sin mirar la pantalla: navegación peatonal con instrucciones habladas y vibración en los giros, lectura de mensajes, llamadas, noticias, música, transporte público, audiolibros y memoria personal. Está pensado desde cero para accesibilidad, no como un añadido.
+<h1 align="center" style="font-family: 'Outfit', 'Segoe UI', sans-serif; font-weight: 900; letter-spacing: 0.04em; font-size: 3.2rem; margin-bottom: 0.2em;">
+  Lazaro AI
+</h1>
 
----
+<p align="center" style="font-family: 'Outfit', sans-serif; font-size: 1.15rem; color: #555;">
+  <strong>Asistente de voz libre para Android</strong><br>
+  Hecho por y para personas ciegas o con baja visión
+</p>
 
-## Tabla de contenidos
-
-- [Motivación](#motivación)
-- [Características principales](#características-principales)
-- [Navegación accesible](#navegación-accesible)
-- [Arquitectura](#arquitectura)
-- [Requisitos](#requisitos)
-- [Instalación y configuración](#instalación-y-configuración)
-- [Permisos necesarios](#permisos-necesarios)
-- [Uso por voz](#uso-por-voz)
-- [Configuración de Gemini](#configuración-de-gemini)
-- [Compilación](#compilación)
-- [Estructura del proyecto](#estructura-del-proyecto)
-- [Contribuir](#contribuir)
-- [Licencia](#licencia)
-- [Autor y contacto](#autor-y-contacto)
+<p align="center">
+  🌍 <strong>Open Source</strong> &nbsp;·&nbsp; 🇪🇸 <strong>Español</strong> &nbsp;·&nbsp; 🏔️ <strong>Nacido en Ojén, Andalucía</strong> &nbsp;·&nbsp; 🤝 <strong>Apache 2.0</strong>
+</p>
 
 ---
 
-## Motivación
+## 🎨 ¿Qué es Lazaro AI?
 
-La mayoría de asistentes asumen que el usuario puede ver la interfaz. Lázaro invierte esa premisa:
+**Lazaro AI** es un compañero de voz en tu móvil Android. No necesitas ver la pantalla: hablas, escuchas y el móvil hace el resto.
 
-- Toda interacción es **por voz**.
-- Las respuestas son **cortas y claras**, pensadas para escuchar, no para leer.
-- Las acciones críticas (navegar, llamar, enviar mensajes) piden **confirmación**.
-- La palabra clave **«Lázaro»** activa el asistente en segundo plano sin bloquear otras apps.
+Nació en la **Villa de Ojén** (Málaga, Andalucía) para cubrir las necesidades reales de un **amigo pintor**, hoy **invidente**. No es un producto de una gran empresa ni un experimento de laboratorio: es una herramienta de barrio, hecha con cariño, para que una persona pueda **moverse, comunicarse y vivir con más autonomía** sin depender de interfaces visuales.
 
-Este proyecto es **Open Source** para que la comunidad de accesibilidad pueda auditarlo, mejorarlo y adaptarlo.
+> **Lazaro AI** combina voz local (rápida y sin gastar datos) con inteligencia artificial **solo donde aporta valor**: recordar cosas, entender frases raras o buscar información. **Nunca** te guía en tiempo real por una nube: la seguridad al caminar la llevan el GPS, la cámara y el cerebro del móvil.
 
 ---
 
-## Características principales
+## 💚 Software libre, comunidad y autonomía
 
-| Área | Qué hace |
-|------|----------|
-| **Voz** | Escucha pasiva continua; al decir «Lázaro» suena un tono breve y escucha tu comando |
-| **Navegación** | Google Maps a pie + Lázaro lee cada giro («Ahora, gira a la derecha en Calle…») y vibra al girar |
-| **Ubicación** | «¿Dónde estoy?», historial de lugares recientes |
-| **Mensajes** | Lee WhatsApp y otras apps; responde por dictado |
-| **Llamadas** | Busca contactos por nombre y llama con confirmación |
-| **Noticias** | Lee titulares de España hoy en voz alta (no abre YouTube) |
-| **Música / vídeo** | Busca en Spotify, YouTube, etc. («Motorhead en Spotify») |
-| **Transporte** | Parada cercana, guiado a pie, ruta en transporte público |
-| **Audiolibros** | Gutenberg, Librivox; soporte Libby |
-| **Memoria** | Guarda direcciones, contactos, preferencias y skills personalizados |
-| **IA** | Google Gemini con function calling para acciones estructuradas |
+Lazaro AI es **código abierto** porque creemos en estos principios:
+
+| Principio | Qué significa para ti |
+|-----------|------------------------|
+| 🆓 **Libertad** | Puedes usarlo, estudiarlo, modificarlo y compartirlo sin pedir permiso a nadie |
+| 👁️ **Transparencia** | La comunidad puede auditar qué hace la app: sin cajas negras ni sorpresas |
+| 🤝 **Comunidad** | Mejoramos el software entre todos: usuarios, familiares, desarrolladores, voluntarios |
+| 🏠 **Autosuficiencia** | Herramientas que funcionan **en tu móvil**, no atadas a un servicio que mañana sube de precio o cierra |
+| 🚫 **Desconfianza sana** | No dependemos de que una institución o empresa decida si «mereces» accesibilidad |
+| 💶 **Realidad española** | Pensado para trabajadores y familias con **dificultades económicas**: sin cuotas, sin hardware caro, sin ataduras |
+
+En un país donde muchas personas con discapacidad visual enfrentan **barreras económicas, burocráticas y tecnológicas**, el software libre no es ideología: es **supervivencia digna**.
 
 ---
 
-## Navegación accesible
+## 🧠 ¿Dónde entra la IA (y dónde NO)?
 
-Lázaro no sustituye Google Maps: lo **complementa** para personas ciegas.
+Lazaro AI usa **Google Gemini** de forma **responsable y acotada**:
+
+| ✅ La IA sí ayuda en… | ❌ La IA NO controla… |
+|----------------------|----------------------|
+| Entender comandos complejos o poco habituales | Los pitidos al caminar (son instantáneos, locales) |
+| Recordar direcciones, contactos y preferencias | La guía por aceras y caminos grabados |
+| Buscar información en internet cuando la pides | La lectura de giros de Maps (viene de notificaciones locales) |
+| Proponer guardar algo que mencionas una vez | La detección de obstáculos con la cámara |
+| Resumir noticias o contestar dudas generales | La decisión de llamar o navegar (siempre pide confirmación) |
+
+**Regla de oro:** lo que importa para tu **seguridad al caminar** corre **en el teléfono**, sin esperar a un servidor.
+
+---
+
+## 📋 Tabla de contenidos
+
+- [Primeros pasos (sin tecnicismos)](#-primeros-pasos-sin-tecnicismos)
+- [Todas las funciones](#-todas-las-funciones)
+- [Comandos de voz completos](#-comandos-de-voz-completos)
+- [Navegación accesible](#-navegación-accesible)
+- [Guía por cámara y rutas grabadas](#-guía-por-cámara-y-rutas-grabadas)
+- [Sitios favoritos](#-sitios-favoritos)
+- [Instalación](#-instalación)
+- [Permisos](#-permisos-necesarios)
+- [Para desarrolladores](#-para-desarrolladores)
+- [Contribuir](#-contribuir)
+- [Licencia](#-licencia)
+
+---
+
+## 🚀 Primeros pasos (sin tecnicismos)
+
+1. **Instala** la app en tu Android (8 o superior).
+2. Abre Lazaro AI y pulsa **Iniciar asistente**.
+3. Concede permisos de **micrófono**, **ubicación** y **notificaciones** cuando te los pida.
+4. Di **«Lazaro»** — oirás un tono corto que confirma que te escucha.
+5. Di lo que necesitas: *«¿Dónde estoy?»*, *«Noticias»*, *«Llévame a casa»*…
+
+💡 **Truco:** también puedes decir todo seguido: *«Lazaro, qué tiempo hace mañana»*.
+
+### Comandos que siempre funcionan
+
+| Dices… | Pasa esto |
+|--------|-----------|
+| **«Para»** / **«Detente»** | Para de hablar, navegar o procesar |
+| **«Cancela»** | Cancela una confirmación pendiente |
+| **«Repíteme las opciones»** | Vuelve a leer las opciones cuando hay que elegir |
+| **«Sí»** / **«Vale»** | Confirma una acción (llamar, navegar, guardar…) |
+| **«No»** | Rechaza y cancela |
+
+---
+
+## 🧰 Todas las funciones
+
+### 🗺️ Navegación y movilidad
+
+| Función | Qué hace |
+|---------|----------|
+| **Navegar a pie** | Abre Google Maps y lee cada giro en voz alta |
+| **Vibración en giros** | Pulso distinto al girar a izquierda, derecha o retorno |
+| **¿Dónde estoy?** | Te dice la dirección aproximada o las coordenadas |
+| **Historial de ubicación** | Si te pierdes, repasa dónde has estado |
+| **Transporte público** | Busca parada cercana o planifica ruta en bus/metro/tren |
+| **Rutas grabadas** | Graba un camino (acera, campo, árboles) y reprodúcelo después |
+| **Navegación híbrida** | Maps en tramos urbanos + Lazaro en tramos que ya grabaste |
+| **Sitios favoritos** | Guarda un lugar con GPS y vuelve cuando quieras |
+| **Modo paseo** | Guía por cámara con pitidos, sin Maps |
+
+### 💬 Comunicación
+
+| Función | Qué hace |
+|---------|----------|
+| **Leer WhatsApp** | Lee mensajes recientes de apps de mensajería |
+| **Responder WhatsApp** | Dictas la respuesta y la envía con confirmación |
+| **Llamar** | Busca contactos por nombre y llama (con confirmación) |
+
+### 📻 Información y ocio
+
+| Función | Qué hace |
+|---------|----------|
+| **Noticias de España** | Lee titulares en voz alta (sin abrir YouTube) |
+| **Tiempo en Ojén** | Previsión hoy, mañana u otra fecha (sin internet obligatorio) |
+| **Hora actual** | Te dice qué hora es |
+| **Calculadora vocal** | Operaciones como *«cuánto es 18 por 37»* |
+| **Música / radio / podcast / vídeo** | Abre Spotify, YouTube, COPE y otras apps |
+| **Buscar en apps** | *«Motorhead en Spotify»* abre y busca directamente |
+| **Audiolibros gratis** | Gutenberg, Librivox; Libby si lo tienes instalado |
+| **Buscar en internet** | Preguntas puntuales vía IA |
+
+### 🧾 Utilidades del día a día
+
+| Función | Qué hace |
+|---------|----------|
+| **Comprobar ticket** | La cámara lee un recibo y verifica que el total cuadra |
+| **Memoria personal** | Guarda casa, teléfonos, preferencias |
+| **Skills personalizados** | Atajos de voz: *«pon la radio»* → abre tu emisora favorita |
+
+### 👁️ Guía espacial (cámara trasera)
+
+| Función | Qué hace |
+|---------|----------|
+| **Pitidos estéreo** | Más sonido a izquierda o derecha según el espacio libre |
+| **Obstáculos** | Detecta coches, postes, escalones y los nombra |
+| **Descripción de escena** | *«Camino despejado»*, *«Puerta a la derecha»*… |
+| **Salidas y puertas** | Guía para encontrar y cruzar entradas |
+| **Navegación exterior** | Acera, cruces peatonales, alineación en calle |
+
+---
+
+## 🎙️ Comandos de voz completos
+
+Di **«Lazaro»** antes (o en la misma frase). Los ejemplos son orientativos: puedes variar las palabras.
+
+### 🗺️ Navegación
+
+```
+«Llévame a [destino]»
+«Guíame a [lugar]»
+«Navega a [dirección]»
+«Cómo llego a [sitio]»
+«Ir a casa» / «Llévame a casa»
+```
+
+Si tienes una **ruta grabada** o un **sitio guardado**, Lazaro te lo propondrá antes de abrir Maps.
+
+### 📍 Sitios favoritos
+
+```
+«Guarda sitio [nombre]»          → Ej: «guarda sitio farmacia»
+«Guarda posición [nombre]»       → Ej: «guarda posición panadería»
+«Marca este lugar como [nombre]»
+«Mis sitios guardados»
+«Mis lugares favoritos»
+«Borra sitio [nombre]»
+```
+
+### 🛤️ Rutas grabadas (Ojén y campo)
+
+```
+«Graba ruta a casa»
+«Para de grabar»
+«Mis rutas»
+«Detalles de la ruta a casa»
+«Borra la ruta a casa»
+```
+
+### 🚶 Modo paseo (sin Maps)
+
+```
+«Modo paseo» / «Iniciar paseo» / «Quiero pasear»
+«Parar paseo» / «Terminar paseo»
+```
+
+### 📍 Ubicación
+
+```
+«¿Dónde estoy?»
+«Dónde estoy»
+«¿En qué calle estoy?»
+```
+
+### 🌤️ Tiempo (Ojén)
+
+```
+«¿Qué tiempo hace?»
+«¿Qué tiempo hace mañana?»
+«Tiempo en Ojén»
+«¿Va a llover?»
+«Previsión del tiempo»
+```
+
+### 🕐 Hora y calculadora
+
+```
+«¿Qué hora es?»
+«Cuánto es [número] por [número]»
+«Calcula 18 por 37»
+```
+
+### 🧾 Ticket y recibo
+
+```
+«Comprueba el ticket»
+«Lee el recibo»
+«Cuánto me cobran»
+«Que no me engañen»
+```
+
+### 📰 Noticias
+
+```
+«Noticias»
+«Titulares»
+«Noticias de hoy»
+«Telediario»
+«¿Qué pasa en España?»
+```
+
+### 💬 Mensajes y llamadas
+
+```
+«Lee el WhatsApp» / «Lee los mensajes»
+«Responde a [nombre]: [mensaje]»
+«Llama a [nombre]»
+```
+
+### 🚌 Transporte público
+
+```
+«Parada de bus cercana»
+«Parada de metro cercana»
+«Ruta en transporte público a [destino]»
+«Cómo llego en bus a [sitio]»
+```
+
+### 🎵 Música, radio y vídeo
+
+```
+«Pon música» / «Abre Spotify»
+«Pon la radio» / «Pon COPE»
+«Pon un podcast»
+«Motorhead en Spotify»
+«Busca [artista] en YouTube»
+```
+
+### 📚 Audiolibros
+
+```
+«Léeme un libro»
+«Léeme el libro [título]»
+«Continúa leyendo»
+```
+
+### 🧠 Memoria
+
+```
+«Recuerda que mi casa es [dirección]»
+«¿Qué tienes guardado sobre casa?»
+«¿Dónde he estado las últimas horas?»
+```
+
+---
+
+## 🧭 Navegación accesible
+
+Lazaro AI **no sustituye** Google Maps: lo **complementa** para personas ciegas.
 
 1. Confirmas el destino por voz.
-2. Se abre **Google Maps** en modo navegación peatonal (`dir_action=navigate`).
-3. Lázaro **lee en voz alta** las instrucciones que Maps publica en sus notificaciones, con formato natural:
+2. Se abre **Google Maps** en modo peatonal.
+3. Lazaro **lee** las instrucciones de Maps en voz natural:
    - *«Ahora, gira a la derecha en Calle Mayor»*
-   - *«Ahora, gira a la izquierda hacia Avenida de la Constitución»*
-4. En cada **giro** (izquierda, derecha, retorno), el móvil emite una **vibración corta** distinta según el lado.
+4. En cada **giro**, el móvil **vibra** de forma distinta según el lado.
 
-### Requisitos para que funcione bien
-
-- **Google Maps** instalado y actualizado.
-- **Acceso a notificaciones** activado para Lázaro (lee las instrucciones de navegación de Maps).
-- Volumen de medios audible; en Maps, comprobar que la guía por voz no esté en silencio.
-
-### Patrones de vibración
+### Vibración en giros
 
 | Maniobra | Vibración |
 |----------|-----------|
-| Giro a la **izquierda** | Dos pulsos cortos |
-| Giro a la **derecha** | Un pulso medio |
-| **Retorno** / U-turn | Tres pulsos |
+| ⬅️ Izquierda | Dos pulsos cortos |
+| ➡️ Derecha | Un pulso medio |
+| ↩️ Retorno | Tres pulsos |
+
+### Para que funcione bien
+
+- ✅ Google Maps instalado y actualizado
+- ✅ **Acceso a notificaciones** activado para Lazaro AI
+- ✅ Volumen de medios audible
 
 ---
 
-## Arquitectura
+## 📷 Guía por cámara y rutas grabadas
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    AssistantForegroundService               │
-│  (micrófono + ubicación en primer plano)                    │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────┐
-│                   AssistantController                       │
-│  Pasivo (wake word) → Activo → Procesar → Hablar → Repetir   │
-└──────┬───────────────┬────────────────┬───────────────────────┘
-       │               │                │
-       ▼               ▼                ▼
- SpeechRecognition  TextToSpeech   GeminiOrchestrator
-       │               │                │
-       │               │                ▼
-       │               │         ActionExecutor
-       │               │    (navegación, llamadas, media…)
-       ▼               ▼
- NavigationGuidanceMonitor ← Notificaciones de Google Maps
-       │
-       └── TurnHapticFeedback (vibración en giros)
-```
+### Modo paseo
+La cámara trasera analiza el espacio y emite **pitidos** más fuertes hacia donde hay más sitio libre. También avisa de obstáculos con frases cortas.
 
-**Stack:** Kotlin · Jetpack Compose · Hilt · Room · Google Gemini · Android Speech API
+### Rutas grabadas (ideal para Ojén → casa)
+1. **Graba** el trayecto caminando: acera en el pueblo, camino rural, árboles…
+2. Lazaro guarda el **perfil espacial** (lado seguro, giros, distancias).
+3. La próxima vez que digas **«llévame a casa»**, ofrece la ruta guardada.
+4. **Maps** lleva el tramo urbano; **Lazaro** retoma la guía fina donde ya pasaste antes.
+
+> Cada nueva grabación **mejora** la ruta (como un mapa dibujado entre varios paseos).
 
 ---
 
-## Requisitos
+## 📌 Sitios favoritos
 
-- **Android 8.0** (API 26) o superior
-- **Clave API de Google Gemini** ([Google AI Studio](https://aistudio.google.com/))
-- **Google Maps** (recomendado para navegación)
-- Conexión a internet para IA, noticias y búsquedas
+Guarda puntos concretos con el GPS del momento:
+
+1. Estás en la farmacia → *«Guarda sitio farmacia»* → **sí**
+2. Otro día → *«Llévame a farmacia»* → **sí** → Maps te lleva al punto exacto
+
+Consulta con *«mis sitios guardados»* o borra con *«borra sitio farmacia»*.
 
 ---
 
-## Instalación y configuración
+## 📲 Instalación
 
-### 1. Clonar el repositorio
+### Usuarios (APK)
 
-```bash
-git clone https://github.com/datak0w/Lazaro.git
-cd Lazaro
-```
+1. Descarga o compila el APK (ver sección desarrolladores).
+2. Instala en el móvil (activa «orígenes desconocidos» si hace falta).
+3. Abre Lazaro AI → **Iniciar asistente** → concede permisos.
 
-### 2. Configurar secretos locales
+### Configurar la IA (opcional pero recomendado)
 
-Copia el ejemplo y edita tus claves (este archivo **no se sube** a Git):
+Copia el archivo de ejemplo y añade tu clave gratuita de [Google AI Studio](https://aistudio.google.com/):
 
 ```bash
 cp local.properties.example local.properties
 ```
 
 ```properties
-sdk.dir=/ruta/a/Android/Sdk
 GEMINI_API_KEY=tu_clave_aqui
 GEMINI_MODEL=gemini-3.5-flash
 ```
 
-En el primer arranque, Lázaro descarga el modelo Vosk en español (~40 MB) para detectar "Lázaro" en reposo **sin pitidos** y sin cuentas externas. Google SR solo se activa tras la wake word.
+> Sin clave Gemini, muchas funciones locales siguen funcionando (navegación, paseo, tiempo, noticias…). La IA mejora el diálogo libre y la memoria inteligente.
 
-### 3. Compilar e instalar
+---
+
+## 🔐 Permisos necesarios
+
+| Permiso | Para qué |
+|---------|----------|
+| 🎤 **Micrófono** | Escucharte y detectar «Lazaro» |
+| 📍 **Ubicación** | Navegar, guardar sitios, rutas, «¿dónde estoy?» |
+| 🔔 **Notificaciones** | Servicio estable + leer giros de Maps |
+| 📱 **Acceso a notificaciones** | WhatsApp y **instrucciones de Google Maps** |
+| 📒 **Contactos / teléfono** | Llamadas por nombre |
+| 📳 **Vibración** | Giros en navegación |
+| 📷 **Cámara** | Paseo, rutas grabadas, tickets |
+| ♿ **Accesibilidad** (opcional) | Confirmar envío en WhatsApp |
+
+---
+
+## 🛠️ Para desarrolladores
+
+### Requisitos
+
+- Android SDK, API 26+
+- JDK 17
+- Clave Gemini en `local.properties` (no subir a Git)
+
+### Compilar
 
 ```bash
+git clone https://github.com/datak0w/Lazaro.git
+cd Lazaro
 ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 4. Activar permisos en el móvil
-
-Tras instalar, abre Lázaro y concede:
-
-1. Micrófono  
-2. Ubicación (incluida en segundo plano si el sistema lo pide)  
-3. Notificaciones  
-4. **Acceso a notificaciones** (Ajustes → Apps → Acceso especial → Acceso a notificaciones → Lázaro)  
-5. Contactos y teléfono (para llamadas)  
-6. Servicio de accesibilidad (solo si usas respuesta automática en WhatsApp)
-
----
-
-## Permisos necesarios
-
-| Permiso | Motivo |
-|---------|--------|
-| `RECORD_AUDIO` | Reconocimiento de voz y palabra clave |
-| `ACCESS_FINE_LOCATION` | Navegación, paradas de transporte, «¿dónde estoy?» |
-| `FOREGROUND_SERVICE_MICROPHONE` | Asistente siempre escuchando de forma estable |
-| `POST_NOTIFICATIONS` | Servicio en primer plano |
-| `READ_CONTACTS` / `CALL_PHONE` | Llamadas por nombre |
-| `VIBRATE` | Vibración al girar en navegación |
-| Acceso a notificaciones | Leer WhatsApp y **instrucciones de Google Maps** |
-| Accesibilidad (opcional) | Confirmar envío en WhatsApp |
-
----
-
-## Uso por voz
-
-### Activar el asistente
-
-1. Abre Lázaro y pulsa **Iniciar asistente** (o deja el servicio en marcha).
-2. Di **«Lázaro»** — oirás un tono breve.
-3. Di tu comando: *«Llévame a la estación de metro»*, *«Noticias»*, *«Lee el WhatsApp»*…
-
-También puedes decir todo junto: *«Lázaro, pon Motorhead en Spotify»*.
-
-### Comandos de interrupción
-
-- **«Para»** / **«Detente»** — detiene lo que esté haciendo (hablar, navegar, procesar).
-- **«Cancela»** — cancela opciones pendientes o confirmaciones.
-- **«Repíteme las opciones»** — cuando hay una lista numerada pendiente.
-
-### Ejemplos
-
-```
-«Lázaro, noticias»
-→ Lee titulares de España hoy
-
-«Lázaro, llévame a Calle Alcalá 42»
-→ Confirma → Maps + instrucciones habladas con vibración
-
-«Lázaro, Motorhead en Spotify»
-→ Busca y abre Spotify
-
-«Lázaro, parada de bus cercana»
-→ Encuentra parada y ofrece guiarte a pie
-```
-
----
-
-## Configuración de Gemini
-
-El modelo por defecto es `gemini-3.5-flash`. Si recibes error 404, actualiza en `local.properties`:
-
-```properties
-GEMINI_MODEL=gemini-3.5-flash
-```
-
-Modelos antiguos como `gemini-2.0-flash` pueden estar deprecados en la API.
-
----
-
-## Compilación
+### Tests
 
 ```bash
-# Depuración
-./gradlew assembleDebug
-
-# Release (requiere firma configurada)
-./gradlew assembleRelease
+./gradlew testDebugUnitTest
 ```
 
-Salida APK: `app/build/outputs/apk/debug/app-debug.apk`
+### Arquitectura (resumen)
 
----
+```
+AssistantForegroundService
+        ↓
+AssistantController  ←→  Speech / TTS / Wake word (Vosk)
+        ↓
+GeminiOrchestrator → ActionExecutor
+        ↓                    ↓
+   Memoria / IA      Navegación, media, rutas…
+                           ↓
+              NavigationGuidanceMonitor ← Maps
+              PathGuideController ← Cámara + pitidos
+```
 
-## Estructura del proyecto
+**Stack:** Kotlin · Jetpack Compose · Hilt · Room · Gemini · Vosk · ML Kit · CameraX
+
+### Estructura del código
 
 ```
 app/src/main/java/io/lazaro/
-├── assistant/          # Flujo de voz y estado del asistente
-├── voice/              # STT, TTS, wake word, notificador
-├── navigation/         # Lectura de giros Maps + vibración
-├── ai/                 # Gemini, herramientas, prompts
-├── actions/            # Ejecutor de acciones (llamadas, maps…)
-├── news/               # Titulares de España por voz
-├── media/              # Spotify, YouTube, radio…
-├── transit/            # Transporte público (Overpass + Maps)
-├── audiobook/          # Gutenberg, Librivox, Libby
-├── messaging/          # WhatsApp y notificaciones
-├── memory/             # Room, skills, ubicación
-└── service/            # Servicio en primer plano
+├── assistant/     # Flujo de voz
+├── voice/         # STT, TTS, wake word
+├── navigation/    # Maps + vibración
+├── pathguide/     # Cámara, pitidos, paseo
+├── routes/        # Rutas grabadas + replay híbrido
+├── actions/       # Ejecutor de comandos
+├── ai/            # Gemini y herramientas
+├── memory/        # Memoria, sitios, skills
+├── news/          # Titulares España
+├── media/         # Spotify, YouTube…
+├── transit/       # Transporte público
+├── audiobook/     # Libros gratis
+├── tools/         # Tiempo, calculadora, clima
+└── receipt/       # Lectura de tickets
 ```
 
 ---
 
-## Contribuir
+## 🤝 Contribuir
 
-Las contribuciones son bienvenidas, especialmente en:
+¡Las contribuciones son bienvenidas! Especialmente:
 
-- Accesibilidad y pruebas con usuarios reales
-- Idiomas y variantes del español
-- Navegación y transporte público
-- Documentación
+- 🧑‍🦯 Pruebas con usuarios ciegos o con baja visión
+- 🇪🇸 Variantes del español (Andalucía, Latinoamérica…)
+- 🗺️ Navegación, transporte y mapas offline
+- 📖 Documentación y traducciones
+- 🐛 Corrección de errores
 
-### Flujo sugerido
+### Cómo colaborar
 
-1. Haz fork del repositorio.
-2. Crea una rama: `git checkout -b feature/mi-mejora`
-3. Commit con mensajes claros en español o inglés.
-4. Abre un Pull Request describiendo el cambio y cómo probarlo.
+1. Haz **fork** del repositorio
+2. Crea una rama: `git checkout -b mejora/mi-aporte`
+3. Haz tus cambios y prueba en un móvil real si puedes
+4. Abre un **Pull Request** explicando qué mejora y cómo probarla
 
-Por favor, no incluyas claves API ni `local.properties` en los commits.
-
----
-
-## Licencia
-
-Este proyecto está licenciado bajo la **Apache License 2.0**.
-
-- Puedes usar, modificar y distribuir el código libremente.
-- Debes **mantener el aviso de copyright** y la licencia en las copias.
-- El autor conserva los **derechos de autor**; la licencia no transfiere la marca «Lázaro».
-
-Consulta el archivo [LICENSE](LICENSE) para el texto legal completo.
+> ⚠️ No subas claves API ni `local.properties`.
 
 ---
 
-## Autor y contacto
+## 📜 Licencia
+
+**Apache License 2.0** — software libre.
+
+- ✅ Usar, modificar y distribuir libremente
+- ✅ Uso personal y comercial
+- 📋 Mantener aviso de copyright y licencia en copias
+
+Texto legal completo: [LICENSE](LICENSE)
+
+---
+
+## ✉️ Autor y contacto
 
 **Copyright © 2026 [datak0w](https://github.com/datak0w)**
 
-- Repositorio: [github.com/datak0w/Lazaro](https://github.com/datak0w/Lazaro)
-- Issues y sugerencias: [GitHub Issues](https://github.com/datak0w/Lazaro/issues)
-
-Si Lázaro te ayuda en tu día a día, considera dar una estrella al repositorio o contribuir con código, pruebas o traducciones.
+- 🐙 Repositorio: [github.com/datak0w/Lazaro](https://github.com/datak0w/Lazaro)
+- 🐛 Incidencias: [GitHub Issues](https://github.com/datak0w/Lazaro/issues)
 
 ---
 
+<p align="center" style="font-family: 'Outfit', sans-serif;">
+  <strong>Lazaro AI</strong> — porque no hace falta ver para ir lejos.<br>
+  <em>De Ojén para el mundo. Software libre para quien más lo necesita.</em>
+</p>
+
 <p align="center">
-  <strong>Lázaro — porque no hace falta ver para ir lejos.</strong>
+  ⭐ Si te ayuda, dale una estrella al repo y cuéntaselo a alguien que pueda necesitarlo.
 </p>

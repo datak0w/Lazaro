@@ -7,6 +7,7 @@ import io.lazaro.navigation.NavigationSessionManager
 import io.lazaro.pathguide.PathGuideController
 import io.lazaro.pathguide.PathGuideMode
 import io.lazaro.pathguide.WalkModeAction
+import io.lazaro.routes.recording.RouteRecorderController
 import io.lazaro.voice.TextToSpeechManager
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,6 +25,7 @@ class StopActiveSessionHandler @Inject constructor(
     private val walkModeAction: WalkModeAction,
     private val bookReaderAction: BookReaderAction,
     private val actionExecutor: ActionExecutor,
+    private val routeRecorderController: RouteRecorderController,
     private val textToSpeechManager: TextToSpeechManager,
 ) {
     fun shouldHandleStop(text: String): Boolean {
@@ -37,6 +39,16 @@ class StopActiveSessionHandler @Inject constructor(
         if (navigationSessionManager.isNavigationActive()) {
             textToSpeechManager.stop()
             navigationSessionManager.endSession(speakConfirmation = true)
+            return StopSessionResult.Handled(spokeMessage = true)
+        }
+
+        if (routeRecorderController.isRecording()) {
+            textToSpeechManager.stop()
+            when (val result = routeRecorderController.stopRecording()) {
+                is ActionResult.Success -> textToSpeechManager.speak(result.message)
+                is ActionResult.Error -> textToSpeechManager.speak(result.message)
+                is ActionResult.NeedsConfirmation -> textToSpeechManager.speak(result.prompt)
+            }
             return StopSessionResult.Handled(spokeMessage = true)
         }
 

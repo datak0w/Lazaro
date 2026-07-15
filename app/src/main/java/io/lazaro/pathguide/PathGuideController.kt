@@ -19,7 +19,15 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import io.lazaro.routes.HybridNavigationCoordinator
+import io.lazaro.routes.location.GpsFix
+import io.lazaro.routes.location.HighAccuracyLocationProvider
+import io.lazaro.routes.recording.RouteRecorderController
+import io.lazaro.routes.replay.RouteReplayBrain
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import dagger.Lazy
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -42,6 +50,10 @@ class PathGuideController @Inject constructor(
     private val textToSpeechManager: TextToSpeechManager,
     private val exitPriorityBrain: ExitPriorityBrain,
     private val outdoorNavigationBrain: OutdoorNavigationBrain,
+    private val routeRecorderController: Lazy<RouteRecorderController>,
+    private val routeReplayBrain: RouteReplayBrain,
+    private val hybridNavigationCoordinator: Lazy<HybridNavigationCoordinator>,
+    private val highAccuracyLocationProvider: HighAccuracyLocationProvider,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pathGuideAnalyzer = PathGuideAnalyzer()
@@ -71,6 +83,10 @@ class PathGuideController @Inject constructor(
     private var lastMapsInstructionType: MapsInstructionType = MapsInstructionType.OTHER
     private var announcing = false
     private var duckJob: Job? = null
+    private var locationJob: Job? = null
+    private var lastGpsFix: GpsFix? = null
+    private var lastRouteFlushMs = 0L
+    private var activeRouteId: Long? = null
 
     init {
         scope.launch {
@@ -80,7 +96,7 @@ class PathGuideController @Inject constructor(
             textToSpeechManager.isSpeaking.collect { speaking ->
                 val duck = when {
                     announcing -> true
-                    _mode.value == PathGuideMode.NAVEGACION ->
+                    _mode.value == PathGuideMode.NAVEGACION || _mode.value == PathGuideMode.RUTA ->
                         navigationAudioCoordinator.shouldDuckBeeps()
                     _mode.value != PathGuideMode.OFF && speaking -> true
                     else -> false
@@ -97,9 +113,9 @@ class PathGuideController @Inject constructor(
 
     fun currentMode(): PathGuideMode = _mode.value
 
-    suspend fun start(mode: PathGuideMode): Boolean {
+    suspend fun start(mode: PathGuideMode, routeId: Long? = null): Boolean {
         if (!config.enabled) return false
-        if (_mode.value == mode) return rearCameraAnalyzer.isRunning()
+        if (_mode.value == mode && activeRouteId == routeId) return rearCameraAnalyzer.isRunning()
         if (_mode.value != PathGuideMode.OFF) stop()
 
         if (!hasCameraPermission()) {
@@ -108,10 +124,12 @@ class PathGuideController @Inject constructor(
         }
 
         _mode.value = mode
+        activeRouteId = routeId
         pathGuideAnalyzer.reset()
         turnAlignmentGuide.reset()
         exitPriorityBrain.reset()
         outdoorNavigationBrain.reset()
+        routeReplayBrain.reset()
         doorwayGuideAnnouncer.reset()
         sceneDescriptionAnnouncer.reset()
         frontalStableMs = 0L
@@ -119,6 +137,14 @@ class PathGuideController @Inject constructor(
         lastSceneDescriptionMs = 0L
         sceneDescriptionPending = false
         lastSceneDescription = null
+        lastRouteFlushMs = 0L
+
+        if (mode == PathGuideMode.RUTA && routeId != null) {
+            routeReplayBrain.loadRoute(routeId)
+        }
+        if (mode == PathGuideMode.GRABANDO || mode == PathGuideMode.RUTA) {
+            bindHighAccuracyLocation()
+        }
 
         stereoBeepEngine.setVolume(config.volume)
         deviceRotationTracker.start()
@@ -138,6 +164,11 @@ class PathGuideController @Inject constructor(
 
     fun stop() {
         _mode.value = PathGuideMode.OFF
+        activeRouteId = null
+        locationJob?.cancel()
+        locationJob = null
+        lastGpsFix = null
+        navigationAudioCoordinator.setReplaySegmentActive(false)
         foregroundBridge.promoteCameraForeground(includeCamera = false)
         announcing = false
         frontalStableMs = 0L
@@ -173,8 +204,10 @@ class PathGuideController @Inject constructor(
 
             val corridor = pathGuideAnalyzer.analyze(gray, width, height, config.sensitivity)
 
-            val brain = if (_mode.value == PathGuideMode.NAVEGACION) {
-                outdoorNavigationBrain.update(
+            val currentMode = _mode.value
+
+            val brain = when (currentMode) {
+                PathGuideMode.NAVEGACION -> outdoorNavigationBrain.update(
                     gray = gray,
                     width = width,
                     height = height,
@@ -183,12 +216,19 @@ class PathGuideController @Inject constructor(
                     config = config,
                     now = now,
                 )
-            } else {
-                exitPriorityBrain.update(
+                PathGuideMode.RUTA -> buildRouteReplayBrain(
+                    gray = gray,
+                    width = width,
+                    height = height,
+                    corridor = corridor,
+                    deltaMs = delta,
+                    now = now,
+                )
+                else -> exitPriorityBrain.update(
                     corridor = corridor,
                     deltaMs = delta,
                     config = config,
-                    mode = _mode.value,
+                    mode = currentMode,
                     now = now,
                     obstacleLabel = lastLabel,
                 )
@@ -203,10 +243,15 @@ class PathGuideController @Inject constructor(
             lastSafeSide = brain.safeSide
             lastMapsInstructionType = brain.mapsInstructionType
 
-            if (_mode.value != PathGuideMode.NAVEGACION) {
+            if (currentMode == PathGuideMode.GRABANDO) {
+                handleRecordingFrame(corridor, brain, now)
+            }
+
+            if (currentMode != PathGuideMode.NAVEGACION && currentMode != PathGuideMode.RUTA) {
                 exitPriorityBrain.trackFrontalBlocked(corridor.isFrontallyBlocked, delta)
             }
 
+            val routeMatch = routeReplayBrain.currentMatch()
             publishDebugState(
                 gray, width, height, corridor, brain.doorwayPhase,
                 now,
@@ -215,6 +260,7 @@ class PathGuideController @Inject constructor(
                 brainPhase = brain.phase,
                 junctionType = brain.junctionType,
                 approachState = brain.approachState,
+                routeMatch = routeMatch,
             )
 
             if (_mode.value == PathGuideMode.DEBUG) {
@@ -232,8 +278,8 @@ class PathGuideController @Inject constructor(
                     continuousTone = brain.continuousTone,
                     warningMode = brain.warningMode,
                 )
-                val voiceCue = if (_mode.value == PathGuideMode.NAVEGACION) {
-                    brain.voiceCue?.takeIf { canSpeakPathGuide(urgent = brain.voiceCue.cueId.startsWith("imu_")) }
+                val voiceCue = if (currentMode == PathGuideMode.NAVEGACION || currentMode == PathGuideMode.RUTA) {
+                    brain.voiceCue?.takeIf { canSpeakPathGuide(urgent = brain.voiceCue.cueId.startsWith("imu_") || brain.voiceCue.cueId.startsWith("route_")) }
                 } else {
                     brain.voiceCue
                 }
@@ -396,9 +442,11 @@ class PathGuideController @Inject constructor(
     private fun maybeAnnounceExitCue(cue: DoorwayVoiceCue?) {
         if (cue == null || announcing || !config.doorwayAlertsEnabled) return
         val isImuCue = cue.cueId.startsWith("imu_")
-        if (_mode.value == PathGuideMode.NAVEGACION && !isImuCue &&
-            !cue.cueId.startsWith("exit_") && !cue.cueId.startsWith("outdoor_")
-        ) return
+        if (_mode.value == PathGuideMode.NAVEGACION || _mode.value == PathGuideMode.RUTA) {
+            if (!isImuCue && !cue.cueId.startsWith("exit_") && !cue.cueId.startsWith("outdoor_") &&
+                !cue.cueId.startsWith("route_")
+            ) return
+        }
         if (!canSpeakPathGuide(urgent = isImuCue || cue.cueId.startsWith("exit_"))) return
         announcing = true
         scope.launch {
@@ -429,6 +477,7 @@ class PathGuideController @Inject constructor(
         brainPhase: ExitBrainPhase = ExitBrainPhase.EXPLORE,
         junctionType: JunctionType = JunctionType.NONE,
         approachState: ApproachState = ApproachState(),
+        routeMatch: io.lazaro.routes.model.RouteMatchState? = null,
     ) {
         if (now - lastDebugPublishMs < DEBUG_FRAME_MS) return
         lastDebugPublishMs = now
@@ -456,6 +505,11 @@ class PathGuideController @Inject constructor(
                 safeSide = lastSafeSide,
                 mapsInstructionType = lastMapsInstructionType,
                 stairPeaks = 0,
+                routeMatchConfidence = routeMatch?.confidence,
+                routeLateralOffsetM = routeMatch?.lateralOffsetM,
+                routeInReplaySegment = routeMatch?.inReplaySegment == true,
+                routeExpectedLeftP = routeMatch?.expectedPoint?.leftP,
+                routeExpectedRightP = routeMatch?.expectedPoint?.rightP,
                 updatedAtMs = now,
             )
         } catch (e: Exception) {
@@ -464,17 +518,17 @@ class PathGuideController @Inject constructor(
     }
 
     private fun shouldSilenceBeepsForMaps(): Boolean {
-        return _mode.value == PathGuideMode.NAVEGACION &&
+        return (_mode.value == PathGuideMode.NAVEGACION || _mode.value == PathGuideMode.RUTA) &&
             navigationAudioCoordinator.shouldDuckBeeps()
     }
 
     private fun canSpeakPathGuide(urgent: Boolean): Boolean {
-        if (_mode.value != PathGuideMode.NAVEGACION) return true
+        if (_mode.value != PathGuideMode.NAVEGACION && _mode.value != PathGuideMode.RUTA) return true
         return navigationAudioCoordinator.canPathGuideSpeak(urgent)
     }
 
     private fun applyNavigationTurnBias(left: Float, right: Float): Pair<Float, Float> {
-        if (_mode.value != PathGuideMode.NAVEGACION) return left to right
+        if (_mode.value != PathGuideMode.NAVEGACION && _mode.value != PathGuideMode.RUTA) return left to right
         return when (navigationAudioCoordinator.lastTurnSide()) {
             TurnSide.LEFT -> left to right * 0.65f
             TurnSide.RIGHT -> left * 0.65f to right
@@ -490,6 +544,81 @@ class PathGuideController @Inject constructor(
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    private fun bindHighAccuracyLocation() {
+        locationJob?.cancel()
+        locationJob = highAccuracyLocationProvider.fixes()
+            .onEach { fix -> lastGpsFix = fix }
+            .launchIn(scope)
+    }
+
+    private fun handleRecordingFrame(
+        corridor: CorridorState,
+        brain: ExitBrainFrameResult,
+        now: Long,
+    ) {
+        val fix = lastGpsFix ?: return
+        routeRecorderController.get().onCorridorSample(
+            corridor = corridor,
+            junction = brain.junctionType,
+            safeSide = brain.safeSide,
+            roadSide = brain.roadSide,
+            obstacleLabel = lastLabel,
+            lat = fix.lat,
+            lng = fix.lng,
+        )
+        if (now - lastRouteFlushMs >= RECORDING_FLUSH_MS) {
+            lastRouteFlushMs = now
+            routeRecorderController.get().appendPeriodicFlush()
+        }
+    }
+
+    private fun buildRouteReplayBrain(
+        gray: ByteArray,
+        width: Int,
+        height: Int,
+        corridor: CorridorState,
+        deltaMs: Long,
+        now: Long,
+    ): ExitBrainFrameResult {
+        val fix = lastGpsFix
+        val replayUpdate = if (fix != null) {
+            routeReplayBrain.update(
+                corridor = corridor,
+                lat = fix.lat,
+                lng = fix.lng,
+                yawDeg = deviceRotationTracker.currentYawDeg(),
+                accuracyM = fix.accuracyM,
+                now = now,
+            )
+        } else {
+            ExitBrainFrameResult(phase = ExitBrainPhase.EXPLORE)
+        }
+
+        val match = routeReplayBrain.currentMatch()
+        if (match != null) {
+            hybridNavigationCoordinator.get().updateReplayMetrics(
+                match.confidence,
+                match.lateralOffsetM,
+                match.inReplaySegment,
+            )
+        }
+
+        val useReplay = match?.inReplaySegment == true && (match.confidence >= 0.7f)
+        return if (useReplay) {
+            replayUpdate
+        } else {
+            outdoorNavigationBrain.update(
+                gray = gray,
+                width = width,
+                height = height,
+                corridor = corridor,
+                deltaMs = deltaMs,
+                config = config,
+                now = now,
+            )
+        }
+    }
+
     fun shutdown() {
         stop()
     }
@@ -497,5 +626,6 @@ class PathGuideController @Inject constructor(
     companion object {
         private const val TAG = "PathGuideController"
         private const val DEBUG_FRAME_MS = 200L
+        private const val RECORDING_FLUSH_MS = 8_000L
     }
 }

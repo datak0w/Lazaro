@@ -23,5 +23,10 @@ data class PathGuideDebugState(
     val safeSide: RoadSide = RoadSide.UNKNOWN,
     val mapsInstructionType: MapsInstructionType = MapsInstructionType.OTHER,
     val stairPeaks: Int = 0,
+    val routeMatchConfidence: Float? = null,
+    val routeLateralOffsetM: Float? = null,
+    val routeInReplaySegment: Boolean = false,
+    val routeExpectedLeftP: Float? = null,
+    val routeExpectedRightP: Float? = null,
     val updatedAtMs: Long = System.currentTimeMillis(),
 )

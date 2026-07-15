@@ -1,6 +1,7 @@
 package io.lazaro.pathguide
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.util.Log
@@ -12,9 +13,11 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import javax.inject.Inject
@@ -32,6 +35,25 @@ class RearCameraAnalyzer @Inject constructor(
     private var imageAnalysis: ImageAnalysis? = null
     private var running = false
     private var frameListener: ((ByteArray, Int, Int, ImageProxy) -> Unit)? = null
+    @Volatile
+    private var snapshotWaiter: CompletableDeferred<GrayFrame>? = null
+
+    suspend fun captureBitmapSnapshot(timeoutMs: Long = 2_500L): Bitmap? = withContext(Dispatchers.Default) {
+        val frame = captureGraySnapshotInternal(timeoutMs) ?: return@withContext null
+        GrayBitmapConverter.toBitmap(frame.bytes, frame.width, frame.height)
+    }
+
+    private suspend fun captureGraySnapshotInternal(timeoutMs: Long = 2_500L): GrayFrame? {
+        val deferred = CompletableDeferred<GrayFrame>()
+        snapshotWaiter = deferred
+        return try {
+            withTimeoutOrNull(timeoutMs) { deferred.await() }
+        } finally {
+            if (snapshotWaiter === deferred) {
+                snapshotWaiter = null
+            }
+        }
+    }
 
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
@@ -98,11 +120,25 @@ class RearCameraAnalyzer @Inject constructor(
 
     private fun processFrame(image: ImageProxy) {
         try {
-            val frame = ImageOrientationNormalizer.toUprightGray(image) ?: run {
-                image.close()
+            val frame = ImageOrientationNormalizer.toUprightGray(image)
+            if (frame != null) {
+                val waiter = snapshotWaiter
+                if (waiter != null && waiter.isActive) {
+                    waiter.complete(
+                        GrayFrame(
+                            bytes = frame.bytes.copyOf(),
+                            width = frame.width,
+                            height = frame.height,
+                        ),
+                    )
+                    snapshotWaiter = null
+                    image.close()
+                    return
+                }
+                frameListener?.invoke(frame.bytes, frame.width, frame.height, image)
                 return
             }
-            frameListener?.invoke(frame.bytes, frame.width, frame.height, image)
+            image.close()
         } catch (e: Exception) {
             Log.e(TAG, "Error procesando frame de cámara", e)
             try {

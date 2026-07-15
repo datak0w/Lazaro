@@ -13,6 +13,7 @@ class NavigationAudioCoordinator @Inject constructor() {
 
     private val navigationActive = AtomicBoolean(false)
     private val mapsSpeaking = AtomicBoolean(false)
+    private val replaySegmentActive = AtomicBoolean(false)
 
     private val _lastMapsInstruction = MutableStateFlow<String?>(null)
     val lastMapsInstruction: StateFlow<String?> = _lastMapsInstruction.asStateFlow()
@@ -39,6 +40,7 @@ class NavigationAudioCoordinator @Inject constructor() {
     fun stopNavigation() {
         navigationActive.set(false)
         mapsSpeaking.set(false)
+        replaySegmentActive.set(false)
         mapsCooldownUntilMs = 0L
         lastTurnSide = null
         turnWindowUntilMs = 0L
@@ -48,6 +50,12 @@ class NavigationAudioCoordinator @Inject constructor() {
     }
 
     fun isNavigationActive(): Boolean = navigationActive.get()
+
+    fun setReplaySegmentActive(active: Boolean) {
+        replaySegmentActive.set(active)
+    }
+
+    fun isReplaySegmentActive(): Boolean = replaySegmentActive.get()
 
     fun onMapsInstructionStarting(instruction: String) {
         mapsSpeaking.set(true)
@@ -99,12 +107,16 @@ class NavigationAudioCoordinator @Inject constructor() {
 
     fun shouldDuckBeeps(): Boolean {
         if (!navigationActive.get()) return false
+        if (replaySegmentActive.get()) return false
         val now = System.currentTimeMillis()
         return mapsSpeaking.get() || now < mapsCooldownUntilMs
     }
 
+    fun shouldDeferMapsSpeech(): Boolean = replaySegmentActive.get()
+
     fun canPathGuideSpeak(urgent: Boolean): Boolean {
         if (!navigationActive.get()) return true
+        if (replaySegmentActive.get()) return true
         if (mapsSpeaking.get()) return false
         val now = System.currentTimeMillis()
         if (now < mapsCooldownUntilMs) return urgent

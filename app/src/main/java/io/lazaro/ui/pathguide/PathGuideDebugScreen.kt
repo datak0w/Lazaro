@@ -252,12 +252,32 @@ private fun DebugMetricsPanel(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.secondary,
         )
-        if (state.mode == io.lazaro.pathguide.PathGuideMode.NAVEGACION) {
+        if (state.mode == io.lazaro.pathguide.PathGuideMode.NAVEGACION ||
+            state.mode == io.lazaro.pathguide.PathGuideMode.RUTA
+        ) {
             Text(
                 "Exterior: ${outdoorPhaseLabel(state.outdoorPhase)} | calzada: ${roadSideLabel(state.roadSide)} | seguro: ${roadSideLabel(state.safeSide)} | Maps: ${mapsTypeLabel(state.mapsInstructionType)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
+        }
+        if (state.mode == io.lazaro.pathguide.PathGuideMode.RUTA ||
+            state.mode == io.lazaro.pathguide.PathGuideMode.GRABANDO
+        ) {
+            val conf = state.routeMatchConfidence?.let { "${(it * 100).toInt()}%" } ?: "—"
+            val lateral = state.routeLateralOffsetM?.let { "%.1f m".format(it) } ?: "—"
+            val replay = if (state.routeInReplaySegment) "sí" else "no"
+            Text(
+                "Ruta: match $conf | offset lateral $lateral | replay $replay",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+            if (state.routeExpectedLeftP != null || state.routeExpectedRightP != null) {
+                Text(
+                    "Perfil canónico L ${pct(state.routeExpectedLeftP ?: 0f)} | R ${pct(state.routeExpectedRightP ?: 0f)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
         Text("Izquierda: ${pct(state.corridor.leftProximity)} | Centro: ${pct(state.corridor.centerProximity)} | Derecha: ${pct(state.corridor.rightProximity)}")
         Text("Centrado: ${if (state.corridor.isCentered) "sí" else "no"} | Bloqueo frontal: ${if (state.corridor.isFrontallyBlocked) "sí" else "no"} | severidad ${pct(state.corridor.frontalSeverity)}")

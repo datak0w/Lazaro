@@ -8,11 +8,17 @@ import io.lazaro.memory.entity.CustomSkill
 import io.lazaro.memory.SkillExecutor
 import io.lazaro.messaging.WhatsAppReplyAction
 import io.lazaro.news.NewsReaderAction
+import io.lazaro.receipt.ReceiptCheckerAction
+import io.lazaro.tools.CalculatorAction
+import io.lazaro.tools.TimeAction
+import io.lazaro.tools.WeatherAction
 import io.lazaro.pathguide.PathGuideController
 import io.lazaro.pathguide.PathGuideMode
 import io.lazaro.pathguide.WalkModeAction
 import io.lazaro.pathguide.WalkModeIntentDetector
 import io.lazaro.pathguide.WalkIntent
+import io.lazaro.memory.SavedPlaceRepository
+import io.lazaro.routes.RouteAction
 import io.lazaro.transit.TransitAction
 import io.lazaro.transit.TransitMode
 import javax.inject.Inject
@@ -31,11 +37,18 @@ class ActionExecutor @Inject constructor(
     private val bookReaderAction: BookReaderAction,
     private val transitAction: TransitAction,
     private val newsReaderAction: NewsReaderAction,
+    private val weatherAction: WeatherAction,
+    private val timeAction: TimeAction,
+    private val calculatorAction: CalculatorAction,
+    private val receiptCheckerAction: ReceiptCheckerAction,
     private val mapsLaunchDeferrer: MapsLaunchDeferrer,
     private val navigationIntentDetector: NavigationIntentDetector,
     private val walkModeIntentDetector: WalkModeIntentDetector,
     private val walkModeAction: WalkModeAction,
     private val pathGuideController: PathGuideController,
+    private val routeAction: RouteAction,
+    private val savedPlaceAction: SavedPlaceAction,
+    private val savedPlaceRepository: SavedPlaceRepository,
 ) {
     private var pendingConfirmation: PendingAction? = null
     private var pendingSkill: CustomSkill? = null
@@ -70,6 +83,10 @@ class ActionExecutor @Inject constructor(
             ToolName.MakeCall.id -> "confirmar la llamada"
             "execute_skill" -> "confirmar el skill"
             "confirm_memory", "confirm_skill" -> "confirmar guardar en memoria"
+            "follow_saved_route" -> "confirmar la ruta guardada"
+            "delete_saved_route" -> "confirmar borrar la ruta"
+            "save_saved_place" -> "confirmar guardar el sitio"
+            "delete_saved_place" -> "confirmar borrar el sitio"
             else -> "tu respuesta"
         }
     }
@@ -135,6 +152,22 @@ class ActionExecutor @Inject constructor(
         return newsReaderAction.tryPrepare(userText)
     }
 
+    suspend fun tryHandleWeatherIntent(userText: String): ActionResult? {
+        return weatherAction.tryPrepare(userText)
+    }
+
+    fun tryHandleTimeIntent(userText: String): ActionResult? {
+        return timeAction.tryPrepare(userText)
+    }
+
+    fun tryHandleCalculatorIntent(userText: String): ActionResult? {
+        return calculatorAction.tryPrepare(userText)
+    }
+
+    suspend fun tryHandleReceiptIntent(userText: String): ActionResult? {
+        return receiptCheckerAction.tryPrepare(userText)
+    }
+
     suspend fun tryHandleWalkIntent(userText: String): ActionResult? {
         return when (walkModeIntentDetector.detect(userText)) {
             WalkIntent.START -> walkModeAction.start()
@@ -143,8 +176,47 @@ class ActionExecutor @Inject constructor(
         }
     }
 
+    suspend fun tryHandleRouteIntent(userText: String): ActionResult? {
+        val result = routeAction.tryPrepare(userText) ?: return null
+        if (result is ActionResult.NeedsConfirmation) {
+            storePending(result.pendingAction, result.prompt)
+        }
+        return result
+    }
+
+    suspend fun tryHandleSavedPlaceIntent(userText: String): ActionResult? {
+        val result = savedPlaceAction.tryPrepare(userText) ?: return null
+        if (result is ActionResult.NeedsConfirmation) {
+            storePending(result.pendingAction, result.prompt)
+        }
+        return result
+    }
+
     suspend fun tryHandleNavigationIntent(userText: String): ActionResult? {
-        val destination = navigationIntentDetector.detectDestination(userText) ?: return null
+        val rawDestination = navigationIntentDetector.detectDestination(userText) ?: return null
+
+        routeAction.tryPrepareHybridNavigation(rawDestination)?.let { hybrid ->
+            if (hybrid is ActionResult.NeedsConfirmation) {
+                storePending(hybrid.pendingAction, hybrid.prompt)
+            }
+            return hybrid
+        }
+
+        savedPlaceRepository.resolvePlace(rawDestination)?.let { place ->
+            val prompt = "¿Confirmas que quieres ir a ${place.displayName} a pie?"
+            val action = PendingAction(
+                ToolName.NavigateTo.id,
+                mapOf(
+                    "destination" to place.displayName,
+                    "latitude" to place.latitude.toString(),
+                    "longitude" to place.longitude.toString(),
+                ),
+            )
+            storePending(action, prompt)
+            return ActionResult.NeedsConfirmation(prompt = prompt, pendingAction = action)
+        }
+
+        val destination = memoryActionHandler.navigateUsingMemory(rawDestination) ?: rawDestination
         val prompt = "¿Confirmas que quieres ir a $destination a pie?"
         val action = PendingAction(ToolName.NavigateTo.id, mapOf("destination" to destination))
         storePending(action, prompt)
@@ -204,6 +276,25 @@ class ActionExecutor @Inject constructor(
         return when (tool) {
             ToolName.NavigateTo -> {
                 val rawDestination = args["destination"].orEmpty()
+                routeAction.tryPrepareHybridNavigation(rawDestination)?.let { hybrid ->
+                    if (hybrid is ActionResult.NeedsConfirmation) {
+                        storePending(hybrid.pendingAction, hybrid.prompt)
+                    }
+                    return hybrid
+                }
+                savedPlaceRepository.resolvePlace(rawDestination)?.let { place ->
+                    val prompt = "¿Confirmas que quieres ir a ${place.displayName} a pie?"
+                    val action = PendingAction(
+                        toolName,
+                        mapOf(
+                            "destination" to place.displayName,
+                            "latitude" to place.latitude.toString(),
+                            "longitude" to place.longitude.toString(),
+                        ),
+                    )
+                    storePending(action, prompt)
+                    return ActionResult.NeedsConfirmation(prompt = prompt, pendingAction = action)
+                }
                 val destination = memoryActionHandler.navigateUsingMemory(rawDestination) ?: rawDestination
                 val prompt = "¿Confirmas que quieres ir a $destination a pie?"
                 val action = PendingAction(toolName, mapOf("destination" to destination))
@@ -326,16 +417,28 @@ class ActionExecutor @Inject constructor(
             }
             ToolName.NavigateTo.id -> {
                 val destination = pending.args["destination"].orEmpty()
+                val lat = pending.args["latitude"]?.toDoubleOrNull()
+                val lng = pending.args["longitude"]?.toDoubleOrNull()
                 if (pathGuideController.currentMode() == PathGuideMode.PASEO) {
                     pathGuideController.stop()
                 }
                 val location = locationAction.getCurrentLocation()
                 deferMapsLaunch {
-                    navigationAction.launchWalkingNavigation(
-                        destination,
-                        location?.latitude,
-                        location?.longitude,
-                    )
+                    if (lat != null && lng != null) {
+                        navigationAction.launchWalkingNavigationToCoordinates(
+                            lat,
+                            lng,
+                            destination,
+                            location?.latitude,
+                            location?.longitude,
+                        )
+                    } else {
+                        navigationAction.launchWalkingNavigation(
+                            destination,
+                            location?.latitude,
+                            location?.longitude,
+                        )
+                    }
                 }
                 ActionResult.Success(
                     "Vale, te guío a pie hasta $destination. " +
@@ -344,6 +447,10 @@ class ActionExecutor @Inject constructor(
                     suspendListening = true,
                 )
             }
+            "save_saved_place" -> savedPlaceAction.confirmSave(pending.args)
+            "delete_saved_place" -> savedPlaceAction.confirmDelete(pending.args)
+            "follow_saved_route" -> routeAction.confirmFollowSavedRoute(pending.args)
+            "delete_saved_route" -> routeAction.confirmDeleteRoute(pending.args)
             ToolName.MakeCall.id -> {
                 val contact = ContactMatch(
                     displayName = pending.args["contact_name"].orEmpty(),

@@ -132,9 +132,18 @@ class GeminiOrchestrator @Inject constructor(
         }
 
         actionExecutor.tryHandleContactSelection(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleTimeIntent(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleCalculatorIntent(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleWeatherIntent(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleReceiptIntent(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleNewsIntent(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleWalkIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleRouteIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleSavedPlaceIntent(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleNavigationIntent(userText)?.let { return toReply(it) }
 
@@ -164,9 +173,17 @@ class GeminiOrchestrator @Inject constructor(
 
         actionExecutor.tryHandleContactSelection(userText)?.let { return toReply(it) }
 
+        actionExecutor.tryHandleTimeIntent(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleCalculatorIntent(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleWeatherIntent(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleReceiptIntent(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleNewsIntent(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleWalkIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleRouteIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleSavedPlaceIntent(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleNavigationIntent(userText)?.let { return toReply(it) }
 

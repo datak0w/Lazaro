@@ -478,7 +478,9 @@ class AssistantController @Inject constructor(
                 if (mapsLaunched) {
                     navigationSessionManager.startSession()
                     scope?.launch {
-                        pathGuideController.start(PathGuideMode.NAVEGACION)
+                        if (pathGuideController.currentMode() != PathGuideMode.RUTA) {
+                            pathGuideController.start(PathGuideMode.NAVEGACION)
+                        }
                     }
                     enterNavigationPause()
                 } else {

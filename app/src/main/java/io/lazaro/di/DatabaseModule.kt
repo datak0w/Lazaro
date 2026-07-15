@@ -13,6 +13,7 @@ import io.lazaro.memory.dao.MemoryDao
 import io.lazaro.memory.dao.ProposalDao
 import io.lazaro.memory.dao.SkillDao
 import io.lazaro.messaging.dao.MessageDao
+import io.lazaro.routes.dao.RouteDao
 import javax.inject.Singleton
 
 @Module
@@ -34,4 +35,5 @@ object DatabaseModule {
     @Provides fun provideLocationDao(db: LazaroDatabase): LocationDao = db.locationDao()
     @Provides fun provideProposalDao(db: LazaroDatabase): ProposalDao = db.proposalDao()
     @Provides fun provideMessageDao(db: LazaroDatabase): MessageDao = db.messageDao()
+    @Provides fun provideRouteDao(db: LazaroDatabase): RouteDao = db.routeDao()
 }

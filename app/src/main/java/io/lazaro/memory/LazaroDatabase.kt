@@ -12,6 +12,13 @@ import io.lazaro.memory.entity.CustomSkill
 import io.lazaro.memory.entity.LocationRecord
 import io.lazaro.memory.entity.MemoryEntry
 import io.lazaro.memory.entity.PendingMemoryProposal
+import io.lazaro.routes.dao.RouteDao
+import io.lazaro.routes.entity.HeatmapCell
+import io.lazaro.routes.entity.RouteMemoryLink
+import io.lazaro.routes.entity.RouteObservation
+import io.lazaro.routes.entity.RouteRun
+import io.lazaro.routes.entity.RouteSegment
+import io.lazaro.routes.entity.SavedRoute
 
 @Database(
     entities = [
@@ -20,8 +27,14 @@ import io.lazaro.memory.entity.PendingMemoryProposal
         LocationRecord::class,
         PendingMemoryProposal::class,
         IncomingMessage::class,
+        SavedRoute::class,
+        RouteRun::class,
+        RouteObservation::class,
+        HeatmapCell::class,
+        RouteMemoryLink::class,
+        RouteSegment::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class LazaroDatabase : RoomDatabase() {
@@ -30,4 +43,5 @@ abstract class LazaroDatabase : RoomDatabase() {
     abstract fun locationDao(): LocationDao
     abstract fun proposalDao(): ProposalDao
     abstract fun messageDao(): MessageDao
+    abstract fun routeDao(): RouteDao
 }

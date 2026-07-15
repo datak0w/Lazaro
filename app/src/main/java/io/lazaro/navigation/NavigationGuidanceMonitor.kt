@@ -46,6 +46,7 @@ class NavigationGuidanceMonitor @Inject constructor(
 
     fun onMapsNotification(extras: Bundle) {
         if (!active.get()) return
+        if (audioCoordinator.shouldDeferMapsSpeech()) return
 
         val title = extras.getCharSequence("android.title")?.toString().orEmpty()
         val text = extras.getCharSequence("android.text")?.toString().orEmpty()
