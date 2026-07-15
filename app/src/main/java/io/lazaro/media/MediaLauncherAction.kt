@@ -2,8 +2,10 @@ package io.lazaro.media
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.lazaro.accessibility.AccessibilityAccessHelper
 import io.lazaro.actions.ActionResult
 import io.lazaro.actions.PendingAction
+import io.lazaro.voice.VoiceOptionParser
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -14,6 +16,7 @@ class MediaLauncherAction @Inject constructor(
     private val mediaSearchIntentDetector: MediaSearchIntentDetector,
     private val installedMediaAppsResolver: InstalledMediaAppsResolver,
     private val mediaFavoritesRepository: MediaFavoritesRepository,
+    private val accessibilityAccessHelper: AccessibilityAccessHelper,
 ) {
     suspend fun tryPrepare(userText: String): ActionResult? {
         tryPrepareSearch(userText)?.let { return it }
@@ -53,9 +56,16 @@ class MediaLauncherAction @Inject constructor(
         val intent = installedMediaAppsResolver.buildSearchIntent(packageName, query)
             ?: return ActionResult.Error("No encuentro ${label.ifBlank { "la app" }}.")
 
+        MediaAutoplayCoordinator.request(packageName, query)
         context.startActivity(intent)
+
         val spokenLabel = label.ifBlank { installedMediaAppsResolver.resolveLabel(packageName, packageName) }
-        return ActionResult.Success("Buscando «$query» en $spokenLabel.")
+        val autoplayHint = if (accessibilityAccessHelper.isAccessibilityEnabled()) {
+            ""
+        } else {
+            " Activa accesibilidad de Lazaro para autoplay fiable."
+        }
+        return ActionResult.Success("Reproduciendo «$query» en $spokenLabel.$autoplayHint")
     }
 
     private suspend fun resolveSearchApp(query: String, appHint: String): InstalledMediaApp? {
@@ -203,7 +213,7 @@ class MediaLauncherAction @Inject constructor(
                 }
             }
 
-        parseNumericSelection(selection)?.let { index ->
+        VoiceOptionParser.parseIndex(selection, candidates.size)?.let { index ->
             if (index in candidates.indices) return candidates[index]
         }
 
@@ -278,20 +288,5 @@ class MediaLauncherAction @Inject constructor(
                 "save_favorite" to saveFavorite.toString(),
             ),
         )
-    }
-
-    private fun parseNumericSelection(text: String): Int? {
-        val normalized = text.lowercase().trim()
-        val wordMap = mapOf(
-            "uno" to 0, "una" to 0, "primero" to 0, "primera" to 0,
-            "dos" to 1, "segundo" to 1, "segunda" to 1,
-            "tres" to 2, "tercero" to 2, "tercera" to 2,
-            "cuatro" to 3, "cinco" to 4,
-        )
-        wordMap[normalized]?.let { return it }
-        normalized.toIntOrNull()?.let { num ->
-            if (num in 1..5) return num - 1
-        }
-        return null
     }
 }

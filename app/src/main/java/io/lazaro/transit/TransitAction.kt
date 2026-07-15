@@ -5,6 +5,7 @@ import io.lazaro.actions.LocationAction
 import io.lazaro.actions.NavigationAction
 import io.lazaro.actions.PendingAction
 import io.lazaro.memory.MemoryRepository
+import io.lazaro.voice.VoiceOptionParser
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -98,7 +99,7 @@ class TransitAction @Inject constructor(
             .values
             .mapNotNull { decodeStop(it) }
 
-        parseNumericSelection(selection)?.let { index ->
+        VoiceOptionParser.parseIndex(selection, candidates.size)?.let { index ->
             if (index in candidates.indices) return candidates[index]
         }
 
@@ -192,19 +193,5 @@ class TransitAction @Inject constructor(
         } else {
             "$meters metros"
         }
-    }
-
-    private fun parseNumericSelection(text: String): Int? {
-        val normalized = text.lowercase().trim()
-        val wordMap = mapOf(
-            "uno" to 0, "una" to 0, "primero" to 0,
-            "dos" to 1, "segundo" to 1,
-            "tres" to 2, "cuatro" to 3, "cinco" to 4,
-        )
-        wordMap[normalized]?.let { return it }
-        normalized.toIntOrNull()?.let { num ->
-            if (num in 1..5) return num - 1
-        }
-        return null
     }
 }

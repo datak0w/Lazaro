@@ -11,7 +11,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,6 +47,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.lazaro.R
+import io.lazaro.cane.CaneConnectionState
+import io.lazaro.cane.CaneHandshakeState
+import io.lazaro.cane.ble.WeWalkDevice
+import io.lazaro.sensor.PiHubConnectionState
 import io.lazaro.ui.theme.LazaroBrandStyle
 import io.lazaro.voice.VoiceState
 
@@ -49,9 +58,13 @@ import io.lazaro.voice.VoiceState
 @Composable
 fun AssistantScreen(
     onOpenMemory: () -> Unit = {},
+    onOpenCaneWizard: () -> Unit = {},
+    onOpenPathGuideDebug: () -> Unit = {},
     viewModel: AssistantViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val caneState by viewModel.caneState.collectAsStateWithLifecycle()
+    val piHubState by viewModel.piHubState.collectAsStateWithLifecycle()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -62,24 +75,32 @@ fun AssistantScreen(
     }
 
     fun requestPermissionsAndStart() {
-        val permissions = buildList {
-            add(Manifest.permission.RECORD_AUDIO)
-            add(Manifest.permission.ACCESS_FINE_LOCATION)
-            add(Manifest.permission.ACCESS_COARSE_LOCATION)
-            add(Manifest.permission.READ_CONTACTS)
-            add(Manifest.permission.CALL_PHONE)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }.toTypedArray()
-        permissionLauncher.launch(permissions)
+        if (viewModel.hasCorePermissions()) {
+            viewModel.startAssistant()
+            return
+        }
+        permissionLauncher.launch(viewModel.requiredPermissions())
     }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = {},
+                title = {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        CaneTopStatusBar(
+                            caneState = caneState,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (piHubState.deviceAddress != null || piHubState.isConnected) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            PiHubTopStatusBar(
+                                hubState = piHubState,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(
                         onClick = onOpenMemory,
@@ -115,7 +136,7 @@ fun AssistantScreen(
                         viewModel.interruptAndListen()
                     }
                     .semantics {
-                        contentDescription = "Pantalla principal de Lazaro. Toca para hablar sin decir Lazaro."
+                        contentDescription = "Pantalla principal de Lázaro. Toca para hablar."
                     },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -133,10 +154,14 @@ fun AssistantScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = if (uiState.awaitingWakeWord && uiState.isServiceRunning) {
-                        stringResource(R.string.wake_word_hint)
-                    } else {
-                        stringResource(R.string.tap_to_interrupt)
+                    text = when {
+                        uiState.voiceState == VoiceState.Listening ||
+                            uiState.voiceState == VoiceState.Processing ||
+                            uiState.voiceState == VoiceState.Speaking ->
+                            stringResource(R.string.tap_to_speak)
+                        uiState.awaitingTrigger && uiState.isServiceRunning ->
+                            stringResource(R.string.trigger_hint)
+                        else -> stringResource(R.string.tap_to_speak)
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -149,7 +174,7 @@ fun AssistantScreen(
                     voiceState = uiState.voiceState,
                     isRunning = uiState.isServiceRunning,
                     audioLevel = uiState.audioLevel,
-                    passiveListening = uiState.awaitingWakeWord && uiState.voiceState == VoiceState.Idle,
+                    standby = uiState.awaitingTrigger && uiState.voiceState == VoiceState.Idle,
                 )
 
                 Spacer(modifier = Modifier.height(32.dp))
@@ -158,7 +183,62 @@ fun AssistantScreen(
                     voiceState = uiState.voiceState,
                     statusMessage = uiState.statusMessage,
                     partialTranscript = uiState.partialTranscript,
+                    standby = uiState.awaitingTrigger &&
+                        uiState.isServiceRunning &&
+                        uiState.voiceState == VoiceState.Idle,
                 )
+
+                if (!caneState.isConnected && uiState.isServiceRunning) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedButton(
+                        onClick = onOpenCaneWizard,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Text(stringResource(R.string.connect_cane))
+                    }
+                }
+
+                if (piHubState.isConnected) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.requestVisionScan() },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        enabled = piHubState.wifiOk && !piHubState.busy,
+                    ) {
+                        Text(
+                            if (piHubState.busy) {
+                                stringResource(R.string.hub_scanning)
+                            } else {
+                                stringResource(R.string.hub_scan_scene)
+                            },
+                        )
+                    }
+                    if (!piHubState.wifiOk) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = stringResource(R.string.hub_wifi_hint),
+                            color = MaterialTheme.colorScheme.tertiary,
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+
+                if (uiState.isServiceRunning) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onOpenPathGuideDebug,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics { contentDescription = "Abrir depuración de cámara" },
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Text("Depuración cámara (vídeo y bandas)")
+                    }
+                }
 
                 if (!uiState.hasApiKey) {
                     Spacer(modifier = Modifier.height(16.dp))
@@ -237,13 +317,190 @@ fun AssistantScreen(
 }
 
 @Composable
+private fun CaneTopStatusBar(
+    caneState: CaneConnectionState,
+    modifier: Modifier = Modifier,
+) {
+    val deviceLabel = caneState.deviceName ?: stringResource(R.string.cane_notification_title)
+    val connected = caneState.isConnected
+
+    val primaryLabel = when {
+        connected && caneState.handshakeState == CaneHandshakeState.IN_PROGRESS ->
+            stringResource(R.string.cane_status_handshake, deviceLabel)
+        connected && caneState.handshakeState == CaneHandshakeState.FAILED ->
+            stringResource(R.string.cane_status_handshake_failed, deviceLabel)
+        connected && caneState.batteryPercent != null ->
+            stringResource(R.string.cane_status_connected, deviceLabel, caneState.batteryPercent!!)
+        connected ->
+            stringResource(R.string.cane_status_connected_no_battery, deviceLabel)
+        caneState.connectionLabel == "Conectando…" ->
+            stringResource(R.string.cane_status_connecting, deviceLabel)
+        caneState.deviceAddress != null ->
+            stringResource(R.string.cane_status_disconnected_top, deviceLabel)
+        else ->
+            stringResource(R.string.cane_status_no_device)
+    }
+
+    val subtitle = when {
+        connected && caneState.handshakeDetail != null ->
+            caneState.handshakeDetail
+        connected && caneState.rssi != null ->
+            stringResource(R.string.cane_status_subtitle, WeWalkDevice.MODEL, caneState.rssi!!)
+        connected ->
+            stringResource(R.string.cane_status_subtitle_no_rssi, WeWalkDevice.MODEL)
+        else -> null
+    }
+
+    val lastEventLine = when {
+        !connected -> null
+        caneState.lastEventHex.isNullOrBlank() -> null
+        caneState.lastEventLabel == "Batería" -> null
+        else -> {
+            val channel = caneState.lastEventLabel ?: "BLE"
+            val hex = caneState.lastEventHex!!.let { payload ->
+                if (payload.length > 20) payload.take(17) + "…" else payload
+            }
+            stringResource(R.string.cane_status_last_event, channel, hex)
+        }
+    }
+
+    val batteryColor = when (val pct = caneState.batteryPercent) {
+        null -> MaterialTheme.colorScheme.onSurfaceVariant
+        in 0..20 -> MaterialTheme.colorScheme.error
+        in 21..40 -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.primary
+    }
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .semantics {
+                contentDescription = buildString {
+                    append("Estado del bastón: $primaryLabel")
+                    subtitle?.let { append(". $it") }
+                    lastEventLine?.let { append(". Último evento: $it") }
+                }
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = if (connected) Icons.Default.Bluetooth else Icons.Default.BluetoothDisabled,
+            contentDescription = null,
+            tint = if (connected) batteryColor else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+        Column(modifier = Modifier.weight(1f, fill = false)) {
+            Text(
+                text = primaryLabel,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            if (lastEventLine != null) {
+                Text(
+                    text = lastEventLine,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                    maxLines = 1,
+                )
+            }
+        }
+        if (connected && caneState.batteryPercent != null) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(batteryColor),
+            )
+        }
+    }
+}
+
+@Composable
+private fun PiHubTopStatusBar(
+    hubState: PiHubConnectionState,
+    modifier: Modifier = Modifier,
+) {
+    val distanceLabel = if (hubState.isConnected && hubState.distOk) {
+        stringResource(R.string.hub_distance_status, hubState.distanceCm)
+    } else if (hubState.isConnected) {
+        stringResource(R.string.hub_distance_unavailable)
+    } else {
+        stringResource(R.string.hub_disconnected_short)
+    }
+
+    val visionLabel = when {
+        hubState.busy -> stringResource(R.string.hub_scanning)
+        hubState.visionSummary.isNotBlank() -> {
+            val truncated = if (hubState.visionSummary.length > 40) {
+                hubState.visionSummary.take(37) + "…"
+            } else {
+                hubState.visionSummary
+            }
+            stringResource(R.string.hub_vision_status, truncated)
+        }
+        !hubState.wifiOk -> stringResource(R.string.hub_no_wifi)
+        hubState.isConnected -> stringResource(R.string.hub_vision_idle)
+        else -> ""
+    }
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f))
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .semantics {
+                contentDescription = buildString {
+                    append("Sensor LazaroHub: $distanceLabel")
+                    if (visionLabel.isNotBlank()) append(". $visionLabel")
+                }
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f, fill = false)) {
+            Text(
+                text = distanceLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+            )
+            if (visionLabel.isNotBlank()) {
+                Text(
+                    text = visionLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun StatusBlock(
     voiceState: VoiceState,
     statusMessage: String,
     partialTranscript: String,
+    standby: Boolean = false,
 ) {
     val stateLabel = when (voiceState) {
-        VoiceState.Idle -> stringResource(R.string.assistant_idle)
+        VoiceState.Idle -> if (standby) {
+            stringResource(R.string.assistant_passive)
+        } else {
+            stringResource(R.string.assistant_idle)
+        }
         VoiceState.Listening -> stringResource(R.string.assistant_listening)
         VoiceState.Processing -> stringResource(R.string.assistant_thinking)
         VoiceState.Speaking -> stringResource(R.string.assistant_speaking)

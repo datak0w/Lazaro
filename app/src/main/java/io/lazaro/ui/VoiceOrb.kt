@@ -32,19 +32,18 @@ fun VoiceOrb(
     voiceState: VoiceState,
     isRunning: Boolean,
     audioLevel: Float,
-    passiveListening: Boolean = false,
+    standby: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val orbColor = MaterialTheme.colorScheme.onBackground
     val isListening = isRunning && voiceState == VoiceState.Listening
-    val isPassive = isRunning && passiveListening && voiceState == VoiceState.Idle
 
     val targetLevel = when {
         !isRunning -> 0f
         isListening -> audioLevel
-        isPassive -> audioLevel.coerceAtLeast(0.06f)
         voiceState == VoiceState.Speaking -> 0.45f
         voiceState == VoiceState.Processing -> 0.25f
+        standby -> 0.05f
         else -> 0.08f
     }
 
@@ -92,7 +91,7 @@ fun VoiceOrb(
                     VoiceState.Speaking -> "Hablando"
                     VoiceState.Error -> "Error"
                     VoiceState.Idle -> if (isRunning) {
-                        if (passiveListening) "Escuchando en silencio" else "Activo"
+                        if (standby) "Listo" else "Activo"
                     } else {
                         "Detenido"
                     }

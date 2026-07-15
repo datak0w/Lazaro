@@ -6,5 +6,5 @@
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"
     android:notificationTimeout="100"
-    android:packageNames="com.whatsapp,com.whatsapp.w4b"
+    android:packageNames="com.whatsapp,com.whatsapp.w4b,com.spotify.music,com.spotify.lite,com.google.android.youtube,com.google.android.apps.youtube.music"
     android:settingsActivity="io.lazaro.MainActivity" />

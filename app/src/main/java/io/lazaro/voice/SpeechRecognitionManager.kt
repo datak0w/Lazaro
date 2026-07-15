@@ -17,7 +17,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private enum class ListeningMode {
-    PASSIVE_WAKE,
     ACTIVE_COMMAND,
     DIRECT_RESPONSE,
 }
@@ -33,49 +32,20 @@ class SpeechRecognitionManager @Inject constructor(
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val locale = Locale("es", "ES")
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var listeningMode: ListeningMode? = null
     private var isListening = false
-    private var wakeWordTriggeredThisSession = false
-    private var lastWakeWordTriggerMs = 0L
 
-    private var onWakeWordCallback: ((String) -> Unit)? = null
     private var onResultCallback: ((String) -> Unit)? = null
     private var onErrorCallback: ((message: String, silent: Boolean) -> Unit)? = null
 
-    private var passiveRestartRunnable: Runnable? = null
-
     fun isAvailable(): Boolean = SpeechRecognizer.isRecognitionAvailable(context)
 
-    fun isActive(): Boolean = isListening || listeningMode != null
-
-    fun isPassiveWakeActive(): Boolean = listeningMode == ListeningMode.PASSIVE_WAKE
-
-    fun startPassiveWakeListening(
-        locale: Locale = Locale("es", "ES"),
-        onWakeWord: (String) -> Unit,
-        onError: (message: String, silent: Boolean) -> Unit,
-    ) {
-        if (!isAvailable()) {
-            onError("Reconocimiento de voz no disponible en este dispositivo.", false)
-            return
-        }
-
-        if (listeningMode == ListeningMode.PASSIVE_WAKE && (isListening || passiveRestartRunnable != null)) {
-            return
-        }
-
-        stopListening()
-        listeningMode = ListeningMode.PASSIVE_WAKE
-        onWakeWordCallback = onWakeWord
-        onResultCallback = null
-        onErrorCallback = onError
-        startSession(locale, ListeningMode.PASSIVE_WAKE)
-    }
+    fun isActive(): Boolean = isListening
 
     fun startActiveCommandListening(
-        locale: Locale = Locale("es", "ES"),
         onResult: (String) -> Unit,
         onError: (message: String, silent: Boolean) -> Unit,
     ) {
@@ -86,14 +56,12 @@ class SpeechRecognitionManager @Inject constructor(
 
         stopListening()
         listeningMode = ListeningMode.ACTIVE_COMMAND
-        onWakeWordCallback = null
         onResultCallback = onResult
         onErrorCallback = onError
-        startSession(locale, ListeningMode.ACTIVE_COMMAND)
+        startSession(ListeningMode.ACTIVE_COMMAND)
     }
 
     fun startDirectResponseListening(
-        locale: Locale = Locale("es", "ES"),
         onResult: (String) -> Unit,
         onError: (message: String, silent: Boolean) -> Unit,
     ) {
@@ -104,70 +72,36 @@ class SpeechRecognitionManager @Inject constructor(
 
         stopListening()
         listeningMode = ListeningMode.DIRECT_RESPONSE
-        onWakeWordCallback = null
         onResultCallback = onResult
         onErrorCallback = onError
-        startSession(locale, ListeningMode.DIRECT_RESPONSE)
-    }
-
-    /** Compatibilidad con llamadas antiguas. */
-    fun startListening(
-        locale: Locale = Locale("es", "ES"),
-        profile: ListeningProfile = ListeningProfile.WAKE_WORD,
-        onResult: (String) -> Unit,
-        onError: (message: String, silent: Boolean) -> Unit,
-        onPartialResult: ((String) -> Unit)? = null,
-    ) {
-        when (profile) {
-            ListeningProfile.WAKE_WORD -> startPassiveWakeListening(
-                locale = locale,
-                onWakeWord = { text ->
-                    val command = WakeWordDetector.parse(text).command
-                    onResult(if (command.isNotBlank()) text else text)
-                },
-                onError = onError,
-            )
-            ListeningProfile.DIRECT_RESPONSE -> startDirectResponseListening(
-                locale = locale,
-                onResult = onResult,
-                onError = onError,
-            )
-        }
-        if (onPartialResult != null) {
-            // Los resultados parciales ya se publican en _partialText.
-        }
+        startSession(ListeningMode.DIRECT_RESPONSE)
     }
 
     fun stopListening() {
-        cancelPassiveRestart()
         listeningMode = null
         isListening = false
-        wakeWordTriggeredThisSession = false
         speechRecognizer?.cancel()
-        onWakeWordCallback = null
         onResultCallback = null
         onErrorCallback = null
         _partialText.value = ""
         _audioLevel.value = 0f
     }
 
-    fun resetRecognizer() {
+    fun releaseRecognizer() {
         stopListening()
         speechRecognizer?.destroy()
         speechRecognizer = null
     }
 
     fun shutdown() {
-        resetRecognizer()
+        releaseRecognizer()
     }
 
-    private fun startSession(locale: Locale, mode: ListeningMode) {
+    private fun startSession(mode: ListeningMode) {
         if (listeningMode != mode) return
-
-        wakeWordTriggeredThisSession = false
         isListening = true
         ensureRecognizer()
-        speechRecognizer?.startListening(buildIntent(locale, mode))
+        speechRecognizer?.startListening(buildIntent(mode))
     }
 
     private fun ensureRecognizer() {
@@ -177,12 +111,12 @@ class SpeechRecognitionManager @Inject constructor(
         }
     }
 
-    private fun buildIntent(locale: Locale, mode: ListeningMode): Intent {
-        val (completeSilence, possibleSilence, minLength) = when (mode) {
-            ListeningMode.PASSIVE_WAKE -> Triple(18_000L, 14_000L, 350L)
-            ListeningMode.ACTIVE_COMMAND -> Triple(7_500L, 5_500L, 180L)
-            ListeningMode.DIRECT_RESPONSE -> Triple(7_500L, 5_500L, 180L)
+    private fun buildIntent(mode: ListeningMode): Intent {
+        val silenceMs = when (mode) {
+            ListeningMode.ACTIVE_COMMAND -> SamsungVoiceCompat.commandSilenceTimeoutMs
+            ListeningMode.DIRECT_RESPONSE -> SamsungVoiceCompat.directSilenceTimeoutMs
         }
+        val possibleSilence = (silenceMs * 0.7).toLong()
 
         return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -191,45 +125,15 @@ class SpeechRecognitionManager @Inject constructor(
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
             putExtra(RecognizerIntent.EXTRA_PROMPT, "")
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, completeSilence)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, silenceMs)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, possibleSilence)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, minLength)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
         }
     }
 
-    private fun schedulePassiveRestart(delayMs: Long = 120L) {
-        if (listeningMode != ListeningMode.PASSIVE_WAKE) return
-        cancelPassiveRestart()
-        passiveRestartRunnable = Runnable {
-            if (listeningMode == ListeningMode.PASSIVE_WAKE && !isListening) {
-                startSession(Locale("es", "ES"), ListeningMode.PASSIVE_WAKE)
-            }
-        }
-        mainHandler.postDelayed(passiveRestartRunnable!!, delayMs)
-    }
-
-    private fun cancelPassiveRestart() {
-        passiveRestartRunnable?.let { mainHandler.removeCallbacks(it) }
-        passiveRestartRunnable = null
-    }
-
-    private fun maybeTriggerWakeWord(text: String) {
-        if (listeningMode != ListeningMode.PASSIVE_WAKE || wakeWordTriggeredThisSession) return
-        if (!WakeWordDetector.containsConfidentWakeWord(text)) return
-
-        val now = System.currentTimeMillis()
-        if (now - lastWakeWordTriggerMs < 4_000L) return
-        lastWakeWordTriggerMs = now
-        wakeWordTriggeredThisSession = true
-
-        cancelPassiveRestart()
-        listeningMode = null
+    private fun endActiveSession() {
         isListening = false
         speechRecognizer?.cancel()
-
-        onWakeWordCallback?.invoke(text)
-        onWakeWordCallback = null
-        onErrorCallback = null
     }
 
     private val recognitionListener = object : RecognitionListener {
@@ -250,40 +154,22 @@ class SpeechRecognitionManager @Inject constructor(
 
         override fun onError(error: Int) {
             val mode = listeningMode ?: return
+
             isListening = false
-
-            val silent = when (error) {
-                SpeechRecognizer.ERROR_NO_MATCH,
-                SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
-                SpeechRecognizer.ERROR_CLIENT,
-                SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
-                SpeechRecognizer.ERROR_NETWORK,
-                SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
-                SpeechRecognizer.ERROR_SERVER,
-                SpeechRecognizer.ERROR_TOO_MANY_REQUESTS,
-                SpeechRecognizer.ERROR_AUDIO,
-                -> true
-                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> false
-                else -> true
-            }
-
-            val message = when (error) {
-                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
-                    "Permiso de micrófono denegado."
-                else -> ""
+            val silent = error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
+            val message = if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                "Permiso de micrófono denegado."
+            } else {
+                ""
             }
 
             when (mode) {
-                ListeningMode.PASSIVE_WAKE -> {
-                    if (silent) {
-                        schedulePassiveRestart(if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 600L else 120L)
-                    } else {
-                        onErrorCallback?.invoke(message, false)
-                    }
-                }
                 ListeningMode.ACTIVE_COMMAND,
                 ListeningMode.DIRECT_RESPONSE,
-                -> onErrorCallback?.invoke(message, silent)
+                -> {
+                    endActiveSession()
+                    onErrorCallback?.invoke(message, silent)
+                }
             }
         }
 
@@ -297,19 +183,13 @@ class SpeechRecognitionManager @Inject constructor(
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
 
+            val bestMatch = candidates.firstOrNull()
+
             when (mode) {
-                ListeningMode.PASSIVE_WAKE -> {
-                    val best = candidates.firstOrNull { WakeWordDetector.containsConfidentWakeWord(it) }
-                    if (best != null) {
-                        maybeTriggerWakeWord(best)
-                    } else {
-                        schedulePassiveRestart()
-                    }
-                }
                 ListeningMode.ACTIVE_COMMAND,
                 ListeningMode.DIRECT_RESPONSE,
                 -> {
-                    val bestMatch = candidates.firstOrNull()
+                    endActiveSession()
                     if (bestMatch != null) {
                         onResultCallback?.invoke(bestMatch)
                     } else {
@@ -324,8 +204,9 @@ class SpeechRecognitionManager @Inject constructor(
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()
                 .orEmpty()
-            _partialText.value = text
-            // En pasivo no activamos por parciales: demasiados falsos positivos.
+            if (text.isNotBlank()) {
+                _partialText.value = text
+            }
         }
 
         override fun onEvent(eventType: Int, params: Bundle?) = Unit

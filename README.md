@@ -144,6 +144,8 @@ GEMINI_API_KEY=tu_clave_aqui
 GEMINI_MODEL=gemini-3.5-flash
 ```
 
+En el primer arranque, Lázaro descarga el modelo Vosk en español (~40 MB) para detectar "Lázaro" en reposo **sin pitidos** y sin cuentas externas. Google SR solo se activa tras la wake word.
+
 ### 3. Compilar e instalar
 
 ```bash

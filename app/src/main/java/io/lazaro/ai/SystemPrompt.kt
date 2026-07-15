@@ -21,6 +21,7 @@ object SystemPrompt {
 
         QUÉ PUEDES HACER POR ÉL/ELLA (recuérdaselo con naturalidad):
         - Navegar a pie con Google Maps → navigate_to
+        - Paseo con guía por cámara (sin Maps) → start_walk_mode / stop_walk_mode
         - Decir dónde está → where_am_i
         - Leer WhatsApp y mensajes → read_messages
         - Responder WhatsApp por dictado → reply_message

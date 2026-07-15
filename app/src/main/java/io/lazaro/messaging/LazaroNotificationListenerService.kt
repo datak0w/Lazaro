@@ -112,6 +112,31 @@ class LazaroNotificationListenerService : NotificationListenerService() {
         return false
     }
 
+    fun tryCloseMapsNotification(sbn: StatusBarNotification): Boolean {
+        val actions = sbn.notification.actions
+        if (actions != null) {
+            for (action in actions) {
+                val title = action.title?.toString()?.lowercase().orEmpty()
+                if (title.contains("salir") || title.contains("detener") ||
+                    title.contains("stop") || title.contains("end") || title.contains("cerrar")
+                ) {
+                    return try {
+                        action.actionIntent.send()
+                        true
+                    } catch (_: PendingIntent.CanceledException) {
+                        false
+                    }
+                }
+            }
+        }
+        return try {
+            cancelNotification(sbn.key)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     companion object {
         const val GOOGLE_MAPS_PACKAGE = "com.google.android.apps.maps"
 
@@ -124,6 +149,17 @@ class LazaroNotificationListenerService : NotificationListenerService() {
             packageName: String,
         ): Boolean {
             return instance?.replyToNotification(senderName, message, packageName) ?: false
+        }
+
+        fun closeMapsNavigation(): Boolean {
+            val service = instance ?: return false
+            val notifications = service.activeNotifications ?: return false
+            var closed = false
+            for (sbn in notifications) {
+                if (sbn.packageName != GOOGLE_MAPS_PACKAGE) continue
+                closed = service.tryCloseMapsNotification(sbn) || closed
+            }
+            return closed
         }
 
         private fun namesMatch(notificationTitle: String, query: String): Boolean {

@@ -14,16 +14,13 @@ object WakeWordDetector {
         "lazaro",
         "lasaro",
         "lazzaro",
+        "lazarro",
+        "hazaro",
     )
 
     fun containsWakeWord(text: String): Boolean = parse(text).detected
 
-    /** Detección estricta para escucha pasiva: evita falsos positivos. */
-    fun containsConfidentWakeWord(text: String): Boolean {
-        val tokens = tokenize(text)
-        if (tokens.isEmpty()) return false
-        return tokens.any { isConfidentWakeToken(it) }
-    }
+    fun containsConfidentWakeWord(text: String): Boolean = containsWakeWord(text)
 
     fun extractCommand(text: String): WakeWordMatch = parse(text)
 
@@ -37,6 +34,17 @@ object WakeWordDetector {
                 return WakeWordMatch(detected = true, command = command)
             }
         }
+
+        // Frases pegadas: "lazarollévame", "lazaro qué tiempo"
+        val normalized = normalize(text).replace(" ", "")
+        if (normalized.startsWith("lazaro") && normalized.length > 6) {
+            val command = normalize(text).removePrefix("lazaro").trim()
+            if (command.isNotBlank()) {
+                return WakeWordMatch(detected = true, command = command)
+            }
+            return WakeWordMatch(detected = true, command = "")
+        }
+
         return WakeWordMatch(detected = false, command = "")
     }
 
@@ -49,15 +57,8 @@ object WakeWordDetector {
     private fun isWakeWordToken(token: String): Boolean {
         val normalized = normalize(token)
         if (normalized in exactWakeWords) return true
-        if (normalized.length !in 4..8) return false
-        return levenshtein(normalized, "lazaro") <= 1
-    }
-
-    private fun isConfidentWakeToken(token: String): Boolean {
-        val normalized = normalize(token)
-        if (normalized in exactWakeWords) return true
-        if (normalized.length !in 5..7) return false
-        return levenshtein(normalized, "lazaro") <= 1
+        if (normalized.length !in 4..9) return false
+        return levenshtein(normalized, "lazaro") <= 2
     }
 
     private fun normalize(text: String): String {
@@ -66,6 +67,7 @@ object WakeWordDetector {
         return withoutAccents
             .lowercase(Locale.getDefault())
             .replace(Regex("[^a-z0-9\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
             .trim()
     }
 

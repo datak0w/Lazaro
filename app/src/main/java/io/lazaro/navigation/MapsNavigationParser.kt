@@ -1,5 +1,6 @@
 package io.lazaro.navigation
 
+import io.lazaro.pathguide.MapsInstructionType
 import java.text.Normalizer
 
 object MapsNavigationParser {
@@ -7,20 +8,50 @@ object MapsNavigationParser {
         "calculando",
         "buscando ruta",
         "ruta encontrada",
-        "has llegado",
-        "llegaste a tu destino",
         "llegada estimada",
         "google maps",
         "navegacion pausada",
         "navegación pausada",
         "recalculando",
+        "sin conexion",
+        "sin conexión",
+        "gps",
+        "ubicacion",
+        "ubicación",
     )
 
-    private val INSTRUCTION_HINTS = listOf(
-        "gira", "gire", "turn", "continúe", "continua", "siga", "sigue",
+    private val ARRIVE_PATTERNS = listOf(
+        "has llegado",
+        "llegaste a tu destino",
+        "has llegado a tu destino",
+        "you have arrived",
+        "arrived at",
+    )
+
+    private val CROSS_PATTERNS = listOf(
+        "cruza", "cruce", "cross", "peatonal", "paso de cebra",
+        "cruzar la calle", "cruzar la avenida", "cross the street",
+        "crosswalk", "paso peatonal",
+    )
+
+    private val STRAIGHT_HINTS = listOf(
+        "sigue recto", "continua recto", "continúa recto", "siga recto",
+        "go straight", "head straight", "mantente en", "manténgase en",
+    )
+
+    private val TURN_HINTS = listOf(
+        "gira", "gire", "turn", "siga", "sigue", "continúe", "continua",
         "tome", "incorporese", "incorpórese", "rotonda", "rotunda",
-        "destino", "metros", " m ", "calle", "avenida", "plaza", "paseo",
-        "carretera", "camino", "izquierda", "derecha", "recto", "u-turn",
+        "izquierda", "derecha", "recto", "u-turn", "retorno",
+        "mantente", "manténgase", "salga", "salir",
+    )
+
+    private val ETA_PATTERNS = listOf(
+        Regex("^\\d+\\s*min"),
+        Regex("^\\d+\\s*h\\s*\\d+"),
+        Regex("^\\d+\\s*km"),
+        Regex("^\\d+\\s*m\\b"),
+        Regex("^\\d+:\\d+"),
     )
 
     fun parse(title: String, text: String, bigText: String): String? {
@@ -31,10 +62,32 @@ object MapsNavigationParser {
 
         for (candidate in candidates) {
             if (shouldIgnore(candidate)) continue
-            if (!looksLikeInstruction(candidate)) continue
+            if (isArrival(candidate)) {
+                return formatForSpeech(candidate)
+            }
+            if (isEtaOrStatusUpdate(candidate)) continue
+            if (!looksLikeNavigationInstruction(candidate)) continue
             return formatForSpeech(candidate)
         }
         return null
+    }
+
+    fun classifyInstruction(text: String): MapsInstructionType {
+        val normalized = normalize(text)
+        return when {
+            ARRIVE_PATTERNS.any { normalized.contains(it) } -> MapsInstructionType.ARRIVE
+            CROSS_PATTERNS.any { normalized.contains(it) } -> MapsInstructionType.CROSS_STREET
+            normalized.contains("rotonda") || normalized.contains("rotunda") ||
+                normalized.contains("roundabout") -> MapsInstructionType.ROUNDABOUT
+            STRAIGHT_HINTS.any { normalized.contains(it) } -> MapsInstructionType.STRAIGHT
+            looksLikeTurnInstruction(text) -> MapsInstructionType.TURN
+            else -> MapsInstructionType.OTHER
+        }
+    }
+
+    fun isArrival(text: String): Boolean {
+        val normalized = normalize(text)
+        return ARRIVE_PATTERNS.any { normalized.contains(it) }
     }
 
     fun isTurnInstruction(instruction: String): Boolean {
@@ -62,21 +115,39 @@ object MapsNavigationParser {
         return IGNORE_PATTERNS.any { normalized.contains(it) }
     }
 
-    private fun looksLikeInstruction(text: String): Boolean {
+    private fun isEtaOrStatusUpdate(text: String): Boolean {
         val normalized = normalize(text)
-        return INSTRUCTION_HINTS.any { normalized.contains(it) }
+        if (ETA_PATTERNS.any { it.containsMatchIn(normalized) }) return true
+        if (!looksLikeNavigationInstruction(text) && normalized.contains("min")) return true
+        return false
+    }
+
+    private fun looksLikeNavigationInstruction(text: String): Boolean {
+        val normalized = normalize(text)
+        return looksLikeTurnInstruction(text) ||
+            CROSS_PATTERNS.any { normalized.contains(it) } ||
+            STRAIGHT_HINTS.any { normalized.contains(it) } ||
+            isArrival(text)
+    }
+
+    private fun looksLikeTurnInstruction(text: String): Boolean {
+        val normalized = normalize(text)
+        return TURN_HINTS.any { normalized.contains(it) }
     }
 
     private fun formatForSpeech(raw: String): String {
         val trimmed = raw.trim().trimEnd('.')
         val lower = trimmed.lowercase()
         return when {
+            isArrival(trimmed) -> "Has llegado a tu destino."
             lower.startsWith("gira") || lower.startsWith("gire") ->
                 "Ahora, $trimmed"
             lower.startsWith("turn") ->
                 "Ahora, $trimmed"
             lower.startsWith("en ") ->
                 "Ahora gira $trimmed"
+            CROSS_PATTERNS.any { normalize(trimmed).contains(it) } ->
+                "Ahora, $trimmed"
             else -> trimmed
         }
     }

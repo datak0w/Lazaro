@@ -118,6 +118,18 @@ object ToolDefinitions {
                     ),
                     requiredParameters = emptyList(),
                 ),
+                FunctionDeclaration(
+                    name = "start_walk_mode",
+                    description = "Activa el modo paseo: guía por cámara con pitidos estéreo sin Google Maps.",
+                    parameters = emptyList(),
+                    requiredParameters = emptyList(),
+                ),
+                FunctionDeclaration(
+                    name = "stop_walk_mode",
+                    description = "Detiene el modo paseo y apaga la guía por cámara.",
+                    parameters = emptyList(),
+                    requiredParameters = emptyList(),
+                ),
             ),
         ),
     )

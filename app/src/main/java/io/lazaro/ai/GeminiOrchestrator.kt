@@ -49,22 +49,27 @@ class GeminiOrchestrator @Inject constructor(
     fun hasApiKey(): Boolean = !BuildConfig.GEMINI_API_KEY.isBlank()
 
     suspend fun handleUserMessage(userText: String): AssistantReply {
-        if (userText.isBlank()) {
+        val cleaned = contextIntentDetector.stripWakeWord(userText).ifBlank { userText }
+        if (cleaned.isBlank()) {
             return AssistantReply("¿Eh? No he pillado nada. Di Lazaro y suelta la que quieras.")
         }
 
         if (actionExecutor.hasPendingConfirmation()) {
-            return handlePendingConversation(userText)
+            return handlePendingConversation(cleaned)
         }
 
-        return handleFreeConversation(userText)
+        return handleFreeConversation(cleaned)
+    }
+
+    private fun repeatablePrompt(): String {
+        return actionExecutor.getLastPromptText()
+            .ifBlank { conversationContext.lastPrompt }
     }
 
     private suspend fun handlePendingConversation(userText: String): AssistantReply {
         when (contextIntentDetector.detect(userText, hasPending = true)) {
             ContextIntent.REPEAT_OPTIONS -> {
-                val prompt = actionExecutor.getLastPromptText()
-                    .ifBlank { conversationContext.lastPrompt }
+                val prompt = repeatablePrompt()
                 return if (prompt.isBlank()) {
                     AssistantReply("No tengo opciones guardadas.", skipAutoLearn = true)
                 } else {
@@ -96,8 +101,6 @@ class GeminiOrchestrator @Inject constructor(
                 return handleFreeConversation(command)
             }
             ContextIntent.INTERRUPT -> {
-                actionExecutor.cancelPending()
-                conversationContext.clearPending()
                 return AssistantReply("", skipAutoLearn = true, actionTaken = true)
             }
             null -> Unit
@@ -131,6 +134,10 @@ class GeminiOrchestrator @Inject constructor(
         actionExecutor.tryHandleContactSelection(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleNewsIntent(userText)?.let { return toReply(it) }
 
+        actionExecutor.tryHandleWalkIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleNavigationIntent(userText)?.let { return toReply(it) }
+
         actionExecutor.tryHandleMediaSearchSelection(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleMediaSelection(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleTransitSelection(userText)?.let { return toReply(it) }
@@ -144,21 +151,24 @@ class GeminiOrchestrator @Inject constructor(
     }
 
     private suspend fun handleFreeConversation(userText: String): AssistantReply {
-        if (contextIntentDetector.detect(userText, hasPending = false) == ContextIntent.INTERRUPT) {
-            return AssistantReply("", skipAutoLearn = true, actionTaken = true)
-        }
-
-        if (contextIntentDetector.detect(userText, hasPending = false) == ContextIntent.REPEAT_OPTIONS) {
-            val prompt = actionExecutor.getLastPromptText()
-                .ifBlank { conversationContext.lastPrompt }
+        if (contextIntentDetector.isRepeatOptionsRequest(userText)) {
+            val prompt = repeatablePrompt()
             if (prompt.isNotBlank()) {
                 return AssistantReply(prompt, skipAutoLearn = true)
             }
         }
 
+        if (contextIntentDetector.detect(userText, hasPending = false) == ContextIntent.INTERRUPT) {
+            return AssistantReply("", skipAutoLearn = true, actionTaken = true)
+        }
+
         actionExecutor.tryHandleContactSelection(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleNewsIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleWalkIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleNavigationIntent(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleMediaSearchSelection(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleMediaSelection(userText)?.let { return toReply(it) }
@@ -201,8 +211,8 @@ class GeminiOrchestrator @Inject constructor(
                     }
                 }
             }
-            actionExecutor.setPendingSkillExecution(skillMatch.skill)
             val prompt = "¿Te monto ${skillMatch.skill.name}? Di sí o no, sin prisa."
+            actionExecutor.setPendingSkillExecution(skillMatch.skill, prompt)
             recordPending(prompt, "confirmar el skill")
             return AssistantReply(prompt)
         }

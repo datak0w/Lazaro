@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.net.Uri
+import android.util.Log
 import androidx.core.net.toUri
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -12,6 +13,7 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.lazaro.messaging.MessageRepository
 import io.lazaro.messaging.NotificationAccessHelper
+import io.lazaro.navigation.MapsLaunchActivity
 import kotlinx.coroutines.tasks.await
 import java.util.Locale
 import javax.inject.Inject
@@ -23,7 +25,7 @@ class NavigationAction @Inject constructor(
 ) {
     private val packageManager get() = context.packageManager
 
-    fun navigateTo(destination: String): ActionResult {
+    suspend fun navigateTo(destination: String): ActionResult {
         if (destination.isBlank()) {
             return ActionResult.Error("No he entendido el destino. ¿A dónde quieres ir?")
         }
@@ -38,7 +40,7 @@ class NavigationAction @Inject constructor(
         )
     }
 
-    fun navigateToCoordinates(
+    suspend fun navigateToCoordinates(
         latitude: Double,
         longitude: Double,
         label: String,
@@ -55,7 +57,7 @@ class NavigationAction @Inject constructor(
         )
     }
 
-    fun openTransitRoute(
+    suspend fun openTransitRoute(
         destination: String,
         originLat: Double? = null,
         originLng: Double? = null,
@@ -74,22 +76,51 @@ class NavigationAction @Inject constructor(
         )
     }
 
-    fun openTransitPlan(destination: String): ActionResult = openTransitRoute(destination)
+    fun openTransitPlan(destination: String): ActionResult = ActionResult.Error(
+        "Confirma la ruta en transporte público antes de abrir Maps.",
+    )
 
-    fun launchWalkingNavigation(destination: String): Boolean {
-        if (destination.isBlank()) return false
-        return launchFirstResolvable(buildWalkingNavigationIntents(destination))
+    suspend fun launchWalkingNavigation(destination: String): Boolean {
+        return launchWalkingNavigation(destination, null, null)
     }
 
-    fun launchWalkingNavigationToCoordinates(
+    suspend fun launchWalkingNavigation(
+        destination: String,
+        originLat: Double?,
+        originLng: Double?,
+    ): Boolean {
+        if (destination.isBlank()) return false
+        return launchFirstResolvable(
+            buildWalkingNavigationIntents(destination, originLat = originLat, originLng = originLng),
+        )
+    }
+
+    suspend fun launchWalkingNavigationToCoordinates(
         latitude: Double,
         longitude: Double,
         label: String,
     ): Boolean {
-        return launchFirstResolvable(buildWalkingNavigationIntents("$latitude,$longitude", label))
+        return launchWalkingNavigationToCoordinates(latitude, longitude, label, null, null)
     }
 
-    fun launchTransitRoute(
+    suspend fun launchWalkingNavigationToCoordinates(
+        latitude: Double,
+        longitude: Double,
+        label: String,
+        originLat: Double?,
+        originLng: Double?,
+    ): Boolean {
+        return launchFirstResolvable(
+            buildWalkingNavigationIntents(
+                "$latitude,$longitude",
+                label = label,
+                originLat = originLat,
+                originLng = originLng,
+            ),
+        )
+    }
+
+    suspend fun launchTransitRoute(
         destination: String,
         originLat: Double? = null,
         originLng: Double? = null,
@@ -110,28 +141,46 @@ class NavigationAction @Inject constructor(
         return launchFirstResolvable(listOf(intent, buildGeoFallbackIntent(destination)))
     }
 
-    private fun buildWalkingNavigationIntents(destination: String, label: String? = null): List<Intent> {
+    private fun buildWalkingNavigationIntents(
+        destination: String,
+        label: String? = null,
+        originLat: Double? = null,
+        originLng: Double? = null,
+    ): List<Intent> {
         val encodedDestination = Uri.encode(destination)
         val intents = mutableListOf<Intent>()
 
         if (isMapsInstalled()) {
-            intents += Intent(
-                Intent.ACTION_VIEW,
-                Uri.parse("https://www.google.com/maps/dir/?api=1")
-                    .buildUpon()
-                    .appendQueryParameter("destination", destination)
-                    .appendQueryParameter("travelmode", "walking")
-                    .appendQueryParameter("dir_action", "navigate")
-                    .build(),
-            ).apply {
+            val dirUri = Uri.parse("https://www.google.com/maps/dir/?api=1")
+                .buildUpon()
+                .appendQueryParameter("destination", destination)
+                .appendQueryParameter("travelmode", "walking")
+                .appendQueryParameter("dir_action", "navigate")
+            if (originLat != null && originLng != null) {
+                dirUri.appendQueryParameter("origin", "$originLat,$originLng")
+            }
+
+            intents += Intent(Intent.ACTION_VIEW, dirUri.build()).apply {
                 setPackage(GOOGLE_MAPS_PACKAGE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
 
             intents += Intent(
                 Intent.ACTION_VIEW,
                 "google.navigation:q=$encodedDestination&mode=w".toUri(),
             ).apply {
+                setPackage(GOOGLE_MAPS_PACKAGE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+
+            val previewUri = Uri.parse("https://www.google.com/maps/dir/?api=1")
+                .buildUpon()
+                .appendQueryParameter("destination", destination)
+                .appendQueryParameter("travelmode", "walking")
+            if (originLat != null && originLng != null) {
+                previewUri.appendQueryParameter("origin", "$originLat,$originLng")
+            }
+            intents += Intent(Intent.ACTION_VIEW, previewUri.build()).apply {
                 setPackage(GOOGLE_MAPS_PACKAGE)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
@@ -149,18 +198,22 @@ class NavigationAction @Inject constructor(
         }
     }
 
-    private fun launchFirstResolvable(intents: List<Intent>): Boolean {
-        for (intent in intents) {
-            if (canResolve(intent)) {
-                context.startActivity(intent)
-                return true
-            }
+    private suspend fun launchFirstResolvable(intents: List<Intent>): Boolean {
+        val resolvable = intents.filter { canResolve(it) }
+        if (resolvable.isEmpty()) {
+            Log.w(TAG, "No resolvable Maps intents for ${intents.map { it.data }}")
+            return false
         }
-        return false
+        val launched = MapsLaunchActivity.launch(context, resolvable)
+        if (!launched) {
+            Log.w(TAG, "MapsLaunchActivity could not open any intent")
+        }
+        return launched
     }
 
     private fun canResolve(intent: Intent): Boolean {
-        return packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null
+        return packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null ||
+            packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY).isNotEmpty()
     }
 
     private fun isMapsInstalled(): Boolean {
@@ -168,6 +221,7 @@ class NavigationAction @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "NavigationAction"
         private const val GOOGLE_MAPS_PACKAGE = "com.google.android.apps.maps"
     }
 }

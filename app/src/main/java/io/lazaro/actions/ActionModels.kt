@@ -28,6 +28,8 @@ enum class ToolName(val id: String) {
     PlayMedia("play_media"),
     FindTransit("find_transit"),
     PlanTransitRoute("plan_transit_route"),
+    StartWalkMode("start_walk_mode"),
+    StopWalkMode("stop_walk_mode"),
     ;
 
     companion object {

@@ -2,6 +2,7 @@ package io.lazaro.audiobook
 
 import io.lazaro.actions.ActionResult
 import io.lazaro.actions.PendingAction
+import io.lazaro.voice.VoiceOptionParser
 import io.lazaro.memory.MemoryRepository
 import io.lazaro.memory.entity.MemoryCategory
 import io.lazaro.voice.TextToSpeechManager
@@ -96,7 +97,7 @@ class BookReaderAction @Inject constructor(
             .values
             .mapNotNull { decodeBook(it) }
 
-        parseNumericSelection(selection)?.let { index ->
+        VoiceOptionParser.parseIndex(selection, candidates.size)?.let { index ->
             if (index in candidates.indices) return candidates[index]
         }
 
@@ -302,20 +303,6 @@ class BookReaderAction @Inject constructor(
         val normalized = text.lowercase()
         return normalized.contains("libby") ||
             normalized.contains("biblioteca") && normalized.contains("audiolibro")
-    }
-
-    private fun parseNumericSelection(text: String): Int? {
-        val normalized = text.lowercase().trim()
-        val wordMap = mapOf(
-            "uno" to 0, "una" to 0, "primero" to 0,
-            "dos" to 1, "segundo" to 1,
-            "tres" to 2, "cuatro" to 3, "cinco" to 4,
-        )
-        wordMap[normalized]?.let { return it }
-        normalized.toIntOrNull()?.let { num ->
-            if (num in 1..5) return num - 1
-        }
-        return null
     }
 
     companion object {

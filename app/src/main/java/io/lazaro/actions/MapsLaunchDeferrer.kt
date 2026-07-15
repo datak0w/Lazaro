@@ -5,13 +5,13 @@ import javax.inject.Singleton
 
 @Singleton
 class MapsLaunchDeferrer @Inject constructor() {
-    private var deferredLaunch: (() -> Boolean)? = null
+    private var deferredLaunch: (suspend () -> Boolean)? = null
 
-    fun defer(launch: () -> Boolean) {
+    fun defer(launch: suspend () -> Boolean) {
         deferredLaunch = launch
     }
 
-    fun runDeferred(): Boolean {
+    suspend fun runDeferred(): Boolean {
         val launch = deferredLaunch ?: return false
         deferredLaunch = null
         return launch()

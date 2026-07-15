@@ -8,6 +8,7 @@ import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.lazaro.contacts.ContactMatch
 import io.lazaro.contacts.ContactResolver
+import io.lazaro.voice.VoiceOptionParser
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -58,7 +59,7 @@ class CallAction @Inject constructor(
                 if (parts.size == 2) ContactMatch(parts[0], parts[1], "contactos") else null
             }
 
-        val index = parseNumericSelection(selection)
+        val index = VoiceOptionParser.parseIndex(selection, candidates.size)
         if (index != null && index in candidates.indices) {
             return candidates[index]
         }
@@ -111,20 +112,5 @@ class CallAction @Inject constructor(
                 ),
             ),
         )
-    }
-
-    private fun parseNumericSelection(text: String): Int? {
-        val normalized = text.lowercase().trim()
-        val wordMap = mapOf(
-            "uno" to 0, "una" to 0, "primero" to 0, "primera" to 0,
-            "dos" to 1, "segundo" to 1, "segunda" to 1,
-            "tres" to 2, "tercero" to 2, "tercera" to 2,
-            "cuatro" to 3, "cinco" to 4,
-        )
-        wordMap[normalized]?.let { return it }
-        normalized.toIntOrNull()?.let { num ->
-            if (num in 1..5) return num - 1
-        }
-        return null
     }
 }

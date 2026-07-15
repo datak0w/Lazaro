@@ -3,6 +3,7 @@ package io.lazaro.ui.memory
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +52,8 @@ import java.util.Date
 @Composable
 fun MemoryManagementScreen(
     onBack: () -> Unit,
+    onOpenCaneWizard: () -> Unit = {},
+    onOpenHubWizard: () -> Unit = {},
     viewModel: MemoryManagementViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -104,6 +108,219 @@ fun MemoryManagementScreen(
                             contentDescription = "Estado: ${uiState.statusMessage}"
                         },
                     )
+                }
+            }
+
+            item {
+                SectionHeader(
+                    title = stringResource(R.string.cane_section_title),
+                    description = if (uiState.caneConnected) {
+                        stringResource(R.string.cane_connected, uiState.caneName ?: uiState.caneMac ?: "")
+                    } else if (uiState.caneMac != null) {
+                        stringResource(R.string.cane_disconnected)
+                    } else {
+                        stringResource(R.string.cane_disconnected)
+                    },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                if (uiState.caneBattery != null) {
+                    Text(
+                        stringResource(R.string.cane_battery, uiState.caneBattery!!),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                if (uiState.caneButtonHex != null) {
+                    Text(
+                        "Botón: ${uiState.caneButtonHex}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                Button(
+                    onClick = onOpenCaneWizard,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.cane_setup_button))
+                }
+                if (uiState.caneConnected) {
+                    if (uiState.caneCaptureActive) {
+                        Text(
+                            stringResource(R.string.cane_capture_active, uiState.caneCaptureCount),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { viewModel.stopAndExportHandshakeCapture() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.cane_capture_stop_export))
+                        }
+                    } else {
+                        Button(
+                            onClick = { viewModel.startHandshakeCapture() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.cane_capture_handshake))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.retryCaneHandshake() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.cane_retry_handshake))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                if (uiState.caneMac != null) {
+                    Button(
+                        onClick = { viewModel.reconnectCane() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.cane_reconnect))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.forgetCane() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.cane_forget))
+                    }
+                }
+            }
+
+            item {
+                SectionHeader(
+                    title = stringResource(R.string.hub_section_title),
+                    description = when {
+                        uiState.hubConnected ->
+                            stringResource(R.string.hub_connected, uiState.hubName ?: uiState.hubMac ?: "")
+                        uiState.hubMac != null ->
+                            stringResource(R.string.hub_disconnected)
+                        else ->
+                            stringResource(R.string.hub_not_paired)
+                    },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                if (uiState.hubConnected && uiState.hubDistanceCm > 0) {
+                    Text(
+                        stringResource(R.string.hub_distance_status, uiState.hubDistanceCm),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                if (uiState.hubMac != null && !uiState.hubWifiOk) {
+                    Text(
+                        stringResource(R.string.hub_wifi_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                Text(
+                    stringResource(R.string.hub_privacy_notice),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onOpenHubWizard,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.hub_setup_button))
+                }
+                if (uiState.hubConnected) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.scanHubNow() },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = uiState.hubWifiOk,
+                    ) {
+                        Text(stringResource(R.string.hub_scan_scene))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                Text(
+                    stringResource(R.string.hub_alert_threshold, uiState.distanceAlertCm),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                RowButtons(
+                    labels = listOf("40 cm", "50 cm", "70 cm", "100 cm"),
+                    onClick = { label ->
+                        val cm = label.removeSuffix(" cm").toIntOrNull() ?: return@RowButtons
+                        viewModel.setDistanceAlertCm(cm)
+                    },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        viewModel.toggleDistanceAlerts(!uiState.distanceAlertsEnabled)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (uiState.distanceAlertsEnabled) {
+                            stringResource(R.string.hub_alerts_on)
+                        } else {
+                            stringResource(R.string.hub_alerts_off)
+                        },
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.hub_vision_interval_label),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                RowButtons(
+                    labels = listOf(
+                        stringResource(R.string.hub_interval_manual),
+                        "15 s",
+                        "30 s",
+                        "60 s",
+                    ),
+                    onClick = { label ->
+                        val sec = when (label) {
+                            "15 s" -> 15
+                            "30 s" -> 30
+                            "60 s" -> 60
+                            else -> 0
+                        }
+                        viewModel.setVisionAutoInterval(sec)
+                    },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { viewModel.toggleVisionTts(!uiState.visionTtsEnabled) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (uiState.visionTtsEnabled) {
+                            stringResource(R.string.hub_vision_tts_on)
+                        } else {
+                            stringResource(R.string.hub_vision_tts_off)
+                        },
+                    )
+                }
+                if (uiState.hubMac != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { viewModel.reconnectHub() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.hub_reconnect))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.forgetHub() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.hub_forget))
+                    }
                 }
             }
 
@@ -318,6 +535,26 @@ private fun LocationItemCard(location: LocationRecord, onDelete: () -> Unit) {
                 modifier = Modifier.semantics { contentDescription = "Eliminar ubicación $label" },
             ) {
                 Text(stringResource(R.string.delete_item))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RowButtons(
+    labels: List<String>,
+    onClick: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        labels.forEach { label ->
+            OutlinedButton(
+                onClick = { onClick(label) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(label, style = MaterialTheme.typography.labelSmall)
             }
         }
     }

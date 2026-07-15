@@ -8,6 +8,11 @@ import io.lazaro.memory.entity.CustomSkill
 import io.lazaro.memory.SkillExecutor
 import io.lazaro.messaging.WhatsAppReplyAction
 import io.lazaro.news.NewsReaderAction
+import io.lazaro.pathguide.PathGuideController
+import io.lazaro.pathguide.PathGuideMode
+import io.lazaro.pathguide.WalkModeAction
+import io.lazaro.pathguide.WalkModeIntentDetector
+import io.lazaro.pathguide.WalkIntent
 import io.lazaro.transit.TransitAction
 import io.lazaro.transit.TransitMode
 import javax.inject.Inject
@@ -27,6 +32,10 @@ class ActionExecutor @Inject constructor(
     private val transitAction: TransitAction,
     private val newsReaderAction: NewsReaderAction,
     private val mapsLaunchDeferrer: MapsLaunchDeferrer,
+    private val navigationIntentDetector: NavigationIntentDetector,
+    private val walkModeIntentDetector: WalkModeIntentDetector,
+    private val walkModeAction: WalkModeAction,
+    private val pathGuideController: PathGuideController,
 ) {
     private var pendingConfirmation: PendingAction? = null
     private var pendingSkill: CustomSkill? = null
@@ -34,11 +43,11 @@ class ActionExecutor @Inject constructor(
 
     fun hasDeferredMapsLaunch(): Boolean = mapsLaunchDeferrer.hasDeferred()
 
-    fun runDeferredMapsLaunch() {
-        mapsLaunchDeferrer.runDeferred()
+    suspend fun runDeferredMapsLaunch(): Boolean {
+        return mapsLaunchDeferrer.runDeferred()
     }
 
-    private fun deferMapsLaunch(launch: () -> Boolean) {
+    private fun deferMapsLaunch(launch: suspend () -> Boolean) {
         mapsLaunchDeferrer.defer(launch)
     }
 
@@ -72,9 +81,16 @@ class ActionExecutor @Inject constructor(
         }
     }
 
-    fun setPendingSkillExecution(skill: CustomSkill) {
+    fun setPendingSkillExecution(skill: CustomSkill, prompt: String) {
         pendingSkill = skill
-        storePending(PendingAction("execute_skill", mapOf("skill_id" to skill.id.toString())))
+        storePending(
+            PendingAction("execute_skill", mapOf("skill_id" to skill.id.toString())),
+            prompt,
+        )
+    }
+
+    fun setAwaitingMemoryConfirmation(prompt: String) {
+        storePending(PendingAction("confirm_memory", emptyMap()), prompt)
     }
 
     suspend fun tryHandleTransitSelection(userText: String): ActionResult? {
@@ -117,6 +133,22 @@ class ActionExecutor @Inject constructor(
 
     suspend fun tryHandleNewsIntent(userText: String): ActionResult? {
         return newsReaderAction.tryPrepare(userText)
+    }
+
+    suspend fun tryHandleWalkIntent(userText: String): ActionResult? {
+        return when (walkModeIntentDetector.detect(userText)) {
+            WalkIntent.START -> walkModeAction.start()
+            WalkIntent.STOP -> walkModeAction.stop()
+            null -> null
+        }
+    }
+
+    suspend fun tryHandleNavigationIntent(userText: String): ActionResult? {
+        val destination = navigationIntentDetector.detectDestination(userText) ?: return null
+        val prompt = "¿Confirmas que quieres ir a $destination a pie?"
+        val action = PendingAction(ToolName.NavigateTo.id, mapOf("destination" to destination))
+        storePending(action, prompt)
+        return ActionResult.NeedsConfirmation(prompt = prompt, pendingAction = action)
     }
 
     suspend fun tryHandleMediaSearchSelection(userText: String): ActionResult? {
@@ -246,6 +278,8 @@ class ActionExecutor @Inject constructor(
                 }
                 prep
             }
+            ToolName.StartWalkMode -> walkModeAction.start()
+            ToolName.StopWalkMode -> walkModeAction.stop()
         }
     }
 
@@ -292,12 +326,21 @@ class ActionExecutor @Inject constructor(
             }
             ToolName.NavigateTo.id -> {
                 val destination = pending.args["destination"].orEmpty()
-                deferMapsLaunch { navigationAction.launchWalkingNavigation(destination) }
+                if (pathGuideController.currentMode() == PathGuideMode.PASEO) {
+                    pathGuideController.stop()
+                }
+                val location = locationAction.getCurrentLocation()
+                deferMapsLaunch {
+                    navigationAction.launchWalkingNavigation(
+                        destination,
+                        location?.latitude,
+                        location?.longitude,
+                    )
+                }
                 ActionResult.Success(
                     "Vale, te guío a pie hasta $destination. " +
-                        "Abro Google Maps. Lazaro te dira cada giro, por ejemplo: " +
-                        "ahora gira a la derecha en tal calle. Vibrara al girar. " +
-                        "Di Lazaro si necesitas algo.",
+                        "Abro Google Maps: Lazaro leerá cada giro y la cámara te guiará con pitidos. " +
+                        "Los avisos de ruta tienen prioridad. Di Lazaro si necesitas algo.",
                     suspendListening = true,
                 )
             }
@@ -320,8 +363,15 @@ class ActionExecutor @Inject constructor(
                 if (lat == null || lng == null) {
                     ActionResult.Error("No tengo la parada lista.")
                 } else {
+                    val location = locationAction.getCurrentLocation()
                     deferMapsLaunch {
-                        navigationAction.launchWalkingNavigationToCoordinates(lat, lng, stopName)
+                        navigationAction.launchWalkingNavigationToCoordinates(
+                            lat,
+                            lng,
+                            stopName,
+                            location?.latitude,
+                            location?.longitude,
+                        )
                     }
                     ActionResult.Success(
                         "Te guío a pie hasta $stopName. Lazaro te dira cada giro y vibrara al girar.",
@@ -362,17 +412,49 @@ class ActionExecutor @Inject constructor(
     fun hasPendingConfirmation(): Boolean = pendingConfirmation != null
 
     fun isAffirmative(text: String): Boolean {
-        val normalized = text.lowercase().trim()
-        return normalized in AFFIRMATIVE || normalized.startsWith("sí") || normalized == "yes"
+        val normalized = normalizeResponse(text)
+        if (normalized.isBlank()) return false
+        if (AFFIRMATIVE.contains(normalized)) return true
+        return AFFIRMATIVE_PREFIXES.any { prefix ->
+            normalized == prefix || normalized.startsWith("$prefix ")
+        }
     }
 
     fun isNegative(text: String): Boolean {
-        val normalized = text.lowercase().trim()
-        return normalized in NEGATIVE || normalized.startsWith("no") || normalized == "cancel"
+        val normalized = normalizeResponse(text)
+        if (normalized.isBlank()) return false
+        if (UNCERTAIN_DENY.any { normalized.contains(it) }) return false
+        if (NEGATIVE_EXACT.contains(normalized)) return true
+        return NEGATIVE_PREFIXES.any { prefix ->
+            normalized == prefix || normalized.startsWith("$prefix ")
+        }
+    }
+
+    private fun normalizeResponse(text: String): String {
+        return java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+            .lowercase()
+            .replace(Regex("[^a-z0-9\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
     }
 
     companion object {
-        private val AFFIRMATIVE = setOf("si", "sí", "confirmo", "confirmar", "vale", "ok", "de acuerdo", "yes")
-        private val NEGATIVE = setOf("no", "cancelar", "cancela", "negativo", "nope")
+        private val AFFIRMATIVE = setOf(
+            "si", "confirmo", "confirmar", "vale", "ok", "de acuerdo", "yes",
+            "claro", "adelante", "por supuesto", "correcto", "afirmativo",
+        )
+        private val AFFIRMATIVE_PREFIXES = listOf(
+            "si", "vale", "ok", "claro", "de acuerdo", "por supuesto",
+        )
+        private val NEGATIVE_EXACT = setOf(
+            "no", "nope", "negativo", "cancelar", "cancela", "nel", "paso",
+        )
+        private val NEGATIVE_PREFIXES = listOf(
+            "no", "cancela", "cancelar",
+        )
+        private val UNCERTAIN_DENY = listOf(
+            "no se", "no lo se", "no entend", "no estoy seguro",
+        )
     }
 }
