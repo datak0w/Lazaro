@@ -36,6 +36,7 @@ class OutdoorNavigationBrain @Inject constructor(
     private var lastCrosswalkCueMs = 0L
     private var lastJunctionCueMs = 0L
     private var lastWalkable = WalkableCorridor()
+    private var depthCapabilities: DepthHardwareCapabilities? = null
     private var depthEnabled = false
     private var depthStarted = false
 
@@ -47,6 +48,7 @@ class OutdoorNavigationBrain @Inject constructor(
         junctionDetector.reset()
         turnAlignmentGuide.reset()
         depthPerceptionProvider.stop()
+        depthCapabilities = null
         depthEnabled = false
         depthStarted = false
         lastSidewalkVoiceMs = 0L
@@ -60,15 +62,30 @@ class OutdoorNavigationBrain @Inject constructor(
         lastWalkable = WalkableCorridor()
     }
 
-    fun setDepthEnabled(enabled: Boolean) {
-        depthEnabled = enabled
-        if (enabled && !depthStarted) {
+    fun configureDepth(capabilities: DepthHardwareCapabilities, enabled: Boolean) {
+        depthCapabilities = capabilities
+        depthPerceptionProvider.configure(capabilities)
+        depthEnabled = enabled && capabilities.mode != DepthGuidanceMode.MONOCULAR
+        if (depthEnabled && !depthStarted) {
             depthPerceptionProvider.start()
             depthStarted = true
-        } else if (!enabled) {
+        } else if (!depthEnabled) {
             depthPerceptionProvider.stop()
             depthStarted = false
         }
+    }
+
+    /** @deprecated Usar [configureDepth]. */
+    fun setDepthEnabled(enabled: Boolean) {
+        val caps = depthCapabilities ?: DepthHardwareCapabilities(
+            mode = if (enabled) DepthGuidanceMode.LDAF_ONLY else DepthGuidanceMode.MONOCULAR,
+            deviceLabel = "desconocido",
+            arCoreSupported = false,
+            arCoreDepthSupported = false,
+            ldafLikely = enabled,
+            reason = "legacy",
+        )
+        configureDepth(caps, enabled)
     }
 
     fun update(

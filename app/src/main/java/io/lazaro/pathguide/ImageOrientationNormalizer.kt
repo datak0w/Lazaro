@@ -6,8 +6,10 @@ internal object ImageOrientationNormalizer {
 
     fun toUprightGray(image: ImageProxy): GrayFrame? {
         val raw = image.toRawGrayPlane() ?: return null
-        return rotate(raw, image.imageInfo.rotationDegrees)
+        return rotateGray(raw, image.imageInfo.rotationDegrees)
     }
+
+    fun rotateGray(frame: GrayFrame, degrees: Int): GrayFrame = rotate(frame, degrees)
 
     private fun rotate(frame: GrayFrame, degrees: Int): GrayFrame {
         val normalized = ((degrees % 360) + 360) % 360

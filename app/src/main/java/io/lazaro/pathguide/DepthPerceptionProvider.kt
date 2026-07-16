@@ -10,86 +10,82 @@ import javax.inject.Singleton
 /**
  * Profundidad opcional para guía exterior.
  *
- * - **LDAF/autofocus** (Pixel 9, etc.): distancia frontal por frame vía CameraX.
- * - **ARCore depth**: reservado; requiere cámara compartida y se activará sin bloquear CameraX.
+ * Estrategias según [DepthHardwareCapabilities]:
+ * - **MONOCULAR**: sin extras.
+ * - **LDAF_ONLY**: distancia frontal puntual vía CameraX/Camera2.
+ * - **ARCORE_DEPTH**: perfil lateral + frontal vía ARCore Depth API.
  */
 @Singleton
 class DepthPerceptionProvider @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private var lastSnapshot = DepthSnapshot()
+    private var capabilities: DepthHardwareCapabilities? = null
     private var arcoreSampler: ArcoreDepthSampler? = null
+    private var arcoreSnapshot: DepthSnapshot? = null
+
+    fun configure(capabilities: DepthHardwareCapabilities) {
+        this.capabilities = capabilities
+    }
 
     fun start() {
-        if (arcoreSampler == null) {
-            arcoreSampler = ArcoreDepthSampler(context)
+        when (capabilities?.mode) {
+            DepthGuidanceMode.ARCORE_DEPTH -> {
+                // La sesión la abre ArcorePathGuideCamera.
+            }
+            DepthGuidanceMode.LDAF_ONLY -> Unit
+            else -> Unit
         }
-        arcoreSampler?.tryEnable()
     }
 
     fun stop() {
         arcoreSampler?.stop()
+        arcoreSampler = null
+        arcoreSnapshot = null
         lastSnapshot = DepthSnapshot()
     }
 
-    fun update(image: ImageProxy?): DepthSnapshot {
-        val focusM = image?.let { FocusDistanceProbe.readMeters(it) }
-        val profile = arcoreSampler?.sampleProfile()
+    internal fun bindArcoreSampler(sampler: ArcoreDepthSampler?) {
+        arcoreSampler = sampler
+        if (sampler == null) {
+            arcoreSnapshot = null
+        }
+    }
 
-        val available = focusM != null || profile != null
-        val source = when {
-            profile != null && focusM != null -> PerceptionSource.FUSED
-            profile != null -> PerceptionSource.DEPTH
-            focusM != null -> PerceptionSource.FUSED
-            else -> PerceptionSource.MONOCULAR
+    internal fun publishArcoreSnapshot(snapshot: DepthSnapshot) {
+        arcoreSnapshot = snapshot
+        lastSnapshot = snapshot
+    }
+
+    fun update(image: ImageProxy?): DepthSnapshot {
+        val caps = capabilities
+        if (caps == null || caps.mode == DepthGuidanceMode.MONOCULAR) {
+            lastSnapshot = DepthSnapshot()
+            return lastSnapshot
         }
 
+        if (caps.mode == DepthGuidanceMode.ARCORE_DEPTH) {
+            val snapshot = arcoreSnapshot ?: lastSnapshot
+            lastSnapshot = snapshot
+            return snapshot
+        }
+
+        val focusM = image?.let { FocusDistanceProbe.readMeters(it) }
         lastSnapshot = DepthSnapshot(
-            profile = profile,
+            profile = null,
             frontalDistanceM = focusM,
-            source = source,
-            available = available,
+            source = if (focusM != null) PerceptionSource.FUSED else PerceptionSource.MONOCULAR,
+            available = focusM != null,
         )
         return lastSnapshot
     }
 
     fun latest(): DepthSnapshot = lastSnapshot
 
+    fun activeMode(): DepthGuidanceMode =
+        capabilities?.mode ?: DepthGuidanceMode.MONOCULAR
+
     companion object {
         private const val TAG = "DepthPerception"
-    }
-}
-
-/**
- * Muestreador ARCore aislado: si no puede compartir cámara con CameraX, permanece inactivo.
- */
-private class ArcoreDepthSampler(
-    private val context: Context,
-) {
-    private var enabled = false
-    private var disabledPermanently = false
-
-    fun tryEnable() {
-        if (disabledPermanently || enabled) return
-        try {
-            val availability = com.google.ar.core.ArCoreApk.getInstance().checkAvailability(context)
-            if (!availability.isSupported) {
-                disabledPermanently = true
-                return
-            }
-            // Sin reanudar sesión aquí: CameraX ya usa la cámara trasera.
-            // El perfil lateral ARCore se activará cuando integremos SharedCamera.
-            Log.i("DepthPerception", "ARCore disponible; perfil lateral pendiente de cámara compartida")
-            disabledPermanently = true
-        } catch (e: Exception) {
-            Log.w("DepthPerception", "ARCore no usable con CameraX activa", e)
-            disabledPermanently = true
-        }
-    }
-
-    fun sampleProfile(): DepthColumnProfile? = null
-
-    fun stop() {
-        enabled = false
     }
 }

@@ -35,7 +35,8 @@ import javax.inject.Singleton
 class PathGuideController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: PathGuideRepository,
-    private val rearCameraAnalyzer: RearCameraAnalyzer,
+    private val pathGuideCameraHost: PathGuideCameraHost,
+    private val depthHardwareDetector: DepthHardwareDetector,
     private val stereoBeepEngine: StereoBeepEngine,
     private val doorwayGuideAnnouncer: DoorwayGuideAnnouncer,
     private val obstacleLabeler: ObstacleLabeler,
@@ -90,6 +91,8 @@ class PathGuideController @Inject constructor(
     private var lastSidewalkRightNorm: Float = 0.78f
     private var lastLateralOffsetNorm: Float = 0f
     private var lastWalkableConfidence: Float = 0f
+    private var lastDepthGuidanceMode: DepthGuidanceMode = DepthGuidanceMode.MONOCULAR
+    private var lastDeviceLabel: String = ""
     private var lastPerceptionSource: PerceptionSource = PerceptionSource.MONOCULAR
     private var lastFrontalDistanceM: Float? = null
     private var lastMapsInstructionType: MapsInstructionType = MapsInstructionType.OTHER
@@ -119,7 +122,7 @@ class PathGuideController @Inject constructor(
                 )
             }
         }
-        rearCameraAnalyzer.setFrameListener { gray, width, height, image ->
+        pathGuideCameraHost.setFrameListener { gray, width, height, image ->
             handleFrame(gray, width, height, image)
         }
     }
@@ -130,7 +133,7 @@ class PathGuideController @Inject constructor(
 
     suspend fun start(mode: PathGuideMode, routeId: Long? = null): Boolean {
         if (!config.enabled) return false
-        if (_mode.value == mode && activeRouteId == routeId) return rearCameraAnalyzer.isRunning()
+        if (_mode.value == mode && activeRouteId == routeId) return pathGuideCameraHost.isRunning()
         if (_mode.value != PathGuideMode.OFF) stop()
 
         if (!hasCameraPermission()) {
@@ -167,13 +170,16 @@ class PathGuideController @Inject constructor(
             mode == PathGuideMode.RUTA ||
             mode == PathGuideMode.DEBUG ||
             mode == PathGuideMode.GRABANDO
-        outdoorNavigationBrain.setDepthEnabled(streetMode && config.depthEnhancedGuidance)
+        val depthCaps = depthHardwareDetector.detect(streetMode && config.depthEnhancedGuidance)
+        lastDepthGuidanceMode = depthCaps.mode
+        lastDeviceLabel = depthCaps.deviceLabel
+        outdoorNavigationBrain.configureDepth(depthCaps, streetMode)
         deviceRotationTracker.start()
         stereoBeepEngine.start()
 
         foregroundBridge.promoteCameraForeground(includeCamera = true)
 
-        val started = rearCameraAnalyzer.start()
+        val started = pathGuideCameraHost.start(streetMode && config.depthEnhancedGuidance)
         if (!started) {
             stop()
             return false
@@ -192,7 +198,7 @@ class PathGuideController @Inject constructor(
         announcing = false
         frontalStableMs = 0L
         _debugState.value = null
-        rearCameraAnalyzer.stop()
+        pathGuideCameraHost.stop()
         deviceRotationTracker.stop()
         stereoBeepEngine.stop()
         turnAlignmentGuide.reset()
@@ -210,7 +216,7 @@ class PathGuideController @Inject constructor(
         gray: ByteArray,
         width: Int,
         height: Int,
-        image: ImageProxy,
+        image: ImageProxy?,
     ) {
         var closeInFinally = true
         try {
@@ -426,7 +432,7 @@ class PathGuideController @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Error en análisis de frame", e)
         } finally {
-            if (closeInFinally) {
+            if (closeInFinally && image != null) {
                 try {
                     image.close()
                 } catch (_: Exception) {
@@ -450,7 +456,7 @@ class PathGuideController @Inject constructor(
     }
 
     private fun maybeDescribeScene(
-        image: ImageProxy,
+        image: ImageProxy?,
         corridor: CorridorState,
         doorwayPhase: DoorwayGuidePhase,
         now: Long,
@@ -553,9 +559,15 @@ class PathGuideController @Inject constructor(
                 routeInReplaySegment = routeMatch?.inReplaySegment == true,
                 routeExpectedLeftP = routeMatch?.expectedPoint?.leftP,
                 routeExpectedRightP = routeMatch?.expectedPoint?.rightP,
+                odmScore = routeMatch?.odmScore,
+                odmAlongM = routeMatch?.odmAlongM,
+                odmGradePct = routeMatch?.odmGradePct,
+                onOdmCorridor = routeMatch?.onOdmCorridor == true,
                 lateralOffsetNorm = lastLateralOffsetNorm,
                 walkableConfidence = lastWalkableConfidence,
                 perceptionSource = lastPerceptionSource,
+                depthGuidanceMode = lastDepthGuidanceMode,
+                deviceLabel = lastDeviceLabel,
                 frontalDistanceM = lastFrontalDistanceM,
                 updatedAtMs = now,
             )
@@ -662,7 +674,7 @@ class PathGuideController @Inject constructor(
         height: Int,
         corridor: CorridorState,
         deltaMs: Long,
-        image: ImageProxy,
+        image: ImageProxy?,
         now: Long,
     ): ExitBrainFrameResult {
         val fix = lastGpsFix
