@@ -13,37 +13,53 @@ object SpatialPhraseBuilder {
         frontalSeverity: Float = 0f,
         mode: PathGuideMode = PathGuideMode.PASEO,
     ): Float {
+        if (closeRange) return CLOSE_RANGE_METERS
+
         val widthCloseness = if (openingWidthNorm > 0f) {
-            ((openingWidthNorm - 0.14f) / 0.36f).coerceIn(0f, 1f)
+            ((openingWidthNorm - 0.12f) / 0.30f).coerceIn(0f, 1f)
         } else {
             0f
         }
+
         val closeness = max(
             proximity,
-            max(frontalSeverity, max(approachFactor, widthCloseness)),
-        )
+            max(frontalSeverity * 0.95f, max(approachFactor, widthCloseness)),
+        ).coerceIn(0f, 1f)
 
-        val isOutdoor = mode == PathGuideMode.NAVEGACION || mode == PathGuideMode.PASEO
-        return when {
-            closeRange || closeness >= 0.82f -> if (isOutdoor) 1.5f else 1.0f
-            closeness >= 0.68f -> if (isOutdoor) 2.0f else 1.5f
-            closeness >= 0.52f -> if (isOutdoor) 3.0f else 2.0f
-            closeness >= 0.38f -> if (isOutdoor) 4.5f else 3.0f
-            closeness >= 0.24f -> if (isOutdoor) 5.5f else 4.5f
-            closeness >= 0.12f -> if (isOutdoor) 6.0f else 6.0f
-            else -> if (isOutdoor) 8.0f else 8.0f
+        val indoorBoost = if (mode == PathGuideMode.NAVEGACION || mode == PathGuideMode.PASEO) {
+            0f
+        } else {
+            0f
         }
+
+        val base = when {
+            closeness >= 0.78f -> 0.6f
+            closeness >= 0.65f -> 0.9f
+            closeness >= 0.52f -> 1.2f
+            closeness >= 0.42f -> 1.6f
+            closeness >= 0.34f -> 2.1f
+            closeness >= 0.27f -> 2.8f
+            closeness >= 0.20f -> 3.6f
+            closeness >= 0.14f -> 4.5f
+            closeness >= 0.08f -> 5.5f
+            else -> 7.0f
+        }
+
+        val outdoorExtra = if (mode == PathGuideMode.NAVEGACION) 0.8f else 0f
+        return (base + outdoorExtra - indoorBoost).coerceIn(0.5f, 12f)
     }
 
     fun formatDistance(meters: Float): String {
         return when {
-            meters < 1.3f -> "1 metro"
-            meters < 1.8f -> "1 metro y medio"
-            meters < 2.3f -> "2 metros"
-            meters < 2.8f -> "2 metros y medio"
-            meters < 3.5f -> "3 metros"
-            meters < 4.5f -> "4 metros"
-            meters < 5.5f -> "5 metros"
+            meters < 0.75f -> "menos de 1 metro"
+            meters < 1.15f -> "1 metro"
+            meters < 1.55f -> "1 metro y medio"
+            meters < 2.05f -> "2 metros"
+            meters < 2.55f -> "2 metros y medio"
+            meters < 3.05f -> "3 metros"
+            meters < 3.85f -> "3 metros y medio"
+            meters < 4.65f -> "4 metros"
+            meters < 5.45f -> "5 metros"
             else -> "${meters.toInt()} metros"
         }
     }
@@ -60,10 +76,13 @@ object SpatialPhraseBuilder {
 
     fun inferSide(corridor: CorridorState): String {
         return when {
-            corridor.isFrontallyBlocked || corridor.centerProximity >= 0.28f -> "delante"
-            corridor.leftProximity > corridor.rightProximity + 0.12f -> "a tu izquierda"
-            corridor.rightProximity > corridor.leftProximity + 0.12f -> "a tu derecha"
-            corridor.leftProximity >= 0.38f && corridor.rightProximity >= 0.38f -> "a ambos lados"
+            corridor.isFrontallyBlocked ||
+                corridor.frontalCloseRange ||
+                corridor.centerProximity >= 0.24f ||
+                corridor.frontalSeverity >= 0.30f -> "delante"
+            corridor.leftProximity > corridor.rightProximity + 0.10f -> "a tu izquierda"
+            corridor.rightProximity > corridor.leftProximity + 0.10f -> "a tu derecha"
+            corridor.leftProximity >= 0.32f && corridor.rightProximity >= 0.32f -> "a ambos lados"
             else -> "delante"
         }
     }
@@ -74,14 +93,59 @@ object SpatialPhraseBuilder {
         mode: PathGuideMode = PathGuideMode.PASEO,
     ): Float {
         val door = doorway ?: corridor.doorway
+        val side = inferSide(corridor)
+        val proximity = proximityForSide(corridor, side)
         return estimateMeters(
-            proximity = max(corridor.centerProximity, max(corridor.leftProximity, corridor.rightProximity)),
+            proximity = proximity,
             approachFactor = door.approachFactor,
             openingWidthNorm = door.openingWidthNorm,
-            closeRange = corridor.frontalCloseRange,
+            closeRange = corridor.frontalCloseRange || corridor.isFrontallyBlocked,
             frontalSeverity = corridor.frontalSeverity,
             mode = mode,
         )
+    }
+
+    fun objectDistanceForCorridor(
+        corridor: CorridorState,
+        doorway: DoorwayState? = null,
+        mode: PathGuideMode = PathGuideMode.PASEO,
+    ): Float {
+        if (corridor.frontalCloseRange) return CLOSE_RANGE_METERS
+
+        val door = doorway ?: corridor.doorway
+        val side = inferSide(corridor)
+        val proximity = proximityForSide(corridor, side)
+        val blockedBoost = if (corridor.isFrontallyBlocked) 0.18f else 0f
+
+        val meters = estimateMeters(
+            proximity = (proximity + blockedBoost).coerceAtMost(1f),
+            approachFactor = door.approachFactor,
+            openingWidthNorm = door.openingWidthNorm,
+            closeRange = corridor.isFrontallyBlocked && corridor.frontalSeverity >= 0.28f,
+            frontalSeverity = corridor.frontalSeverity,
+            mode = mode,
+        )
+
+        return if (corridor.isFrontallyBlocked || corridor.frontalSeverity >= 0.35f) {
+            meters.coerceAtMost(1.8f)
+        } else {
+            meters
+        }
+    }
+
+    private fun proximityForSide(corridor: CorridorState, side: String): Float {
+        return when {
+            side == "delante" -> max(
+                corridor.centerProximity,
+                max(corridor.frontalSeverity * 0.9f, max(corridor.leftProximity, corridor.rightProximity) * 0.65f),
+            )
+            side.contains("izquierda") -> max(corridor.leftProximity, corridor.centerProximity * 0.55f)
+            side.contains("derecha") -> max(corridor.rightProximity, corridor.centerProximity * 0.55f)
+            else -> max(
+                corridor.centerProximity,
+                max(corridor.leftProximity, corridor.rightProximity),
+            )
+        }
     }
 
     fun seeObjectPhrase(
@@ -89,7 +153,7 @@ object SpatialPhraseBuilder {
         corridor: CorridorState,
         doorway: DoorwayState? = null,
     ): String {
-        val distance = formatDistance(distanceForCorridor(corridor, doorway))
+        val distance = formatDistance(objectDistanceForCorridor(corridor, doorway))
         val side = inferSide(corridor)
         return "Veo ${articleFor(label)} a $distance $side"
     }
@@ -99,15 +163,8 @@ object SpatialPhraseBuilder {
         corridor: CorridorState,
         approach: ApproachState,
     ): String {
-        val distance = formatDistance(
-            estimateMeters(
-                proximity = corridor.centerProximity,
-                approachFactor = corridor.doorway.approachFactor,
-                openingWidthNorm = corridor.doorway.openingWidthNorm,
-                closeRange = corridor.frontalCloseRange,
-                frontalSeverity = corridor.frontalSeverity,
-            ) * (1f - approach.velocity.coerceIn(0f, 0.35f)),
-        )
+        val base = objectDistanceForCorridor(corridor)
+        val distance = formatDistance(base * (1f - approach.velocity.coerceIn(0f, 0.30f)))
         val side = inferSide(corridor)
         return "Te acercas a ${articleFor(label)} a $distance $side"
     }
@@ -158,6 +215,7 @@ object SpatialPhraseBuilder {
             estimateMeters(
                 approachFactor = door.approachFactor,
                 openingWidthNorm = door.openingWidthNorm,
+                proximity = door.approachFactor.coerceAtLeast(0.35f),
             ),
         )
         val position = lateralOffsetPhrase(door.centerNorm - 0.5f)
@@ -187,21 +245,21 @@ object SpatialPhraseBuilder {
             estimateMeters(
                 approachFactor = door.approachFactor,
                 openingWidthNorm = door.openingWidthNorm,
-                proximity = 0.5f,
+                proximity = max(door.approachFactor, 0.55f),
+                closeRange = door.approachFactor >= 0.55f,
             ),
         )
         return "Perfecto. La puerta está centrada a $distance. Ve adelante."
     }
 
     fun frontalObstaclePhrase(
-        label: String,
+        label: String = "obstáculo",
         corridor: CorridorState,
         advice: BypassAdvice,
         mode: PathGuideMode = PathGuideMode.PASEO,
     ): String {
-        val distance = formatDistance(distanceForCorridor(corridor, mode = mode))
-        val side = inferSide(corridor)
-        val objectPhrase = "Veo ${articleFor(label)} a $distance $side"
+        val distance = formatDistance(objectDistanceForCorridor(corridor, mode = mode))
+        val objectPhrase = "Obstáculo delante a $distance"
         return when (advice.side) {
             BypassSide.STOP -> "$objectPhrase. Detente."
             BypassSide.LEFT -> "$objectPhrase. Esquiva por la izquierda."
@@ -233,4 +291,6 @@ object SpatialPhraseBuilder {
             }
         }
     }
+
+    private const val CLOSE_RANGE_METERS = 0.55f
 }

@@ -22,16 +22,6 @@ class SceneDescriber @Inject constructor(
             else -> parts += pathPhrase(snapshot.corridor)
         }
 
-        val objects = snapshot.labels.items
-            .map { it.spanish }
-            .filter { it !in REDUNDANT_OBJECTS }
-            .distinct()
-            .take(if (mapsInstruction.isNullOrBlank()) 3 else 1)
-
-        if (objects.isNotEmpty() && mapsInstruction.isNullOrBlank()) {
-            parts += formatObjectsSpatial(objects, snapshot.corridor)
-        }
-
         lateralHints(snapshot.corridor)?.let { parts += it }
 
         return parts.distinct().joinToString(". ") + "."
@@ -40,10 +30,7 @@ class SceneDescriber @Inject constructor(
     private fun doorwayPhrase(snapshot: SceneSnapshot): String {
         val door = snapshot.corridor.doorway
         val distance = SpatialPhraseBuilder.formatDistance(
-            SpatialPhraseBuilder.estimateMeters(
-                approachFactor = door.approachFactor,
-                openingWidthNorm = door.openingWidthNorm,
-            ),
+            SpatialPhraseBuilder.objectDistanceForCorridor(snapshot.corridor),
         )
         val position = SpatialPhraseBuilder.lateralOffsetPhrase(door.centerNorm - 0.5f)
         return when (snapshot.doorwayPhase) {
@@ -61,9 +48,7 @@ class SceneDescriber @Inject constructor(
     }
 
     private fun frontalPhrase(snapshot: SceneSnapshot): String {
-        val label = snapshot.labels.primaryOrDefault()
         return SpatialPhraseBuilder.frontalObstaclePhrase(
-            label = label,
             corridor = snapshot.corridor,
             advice = bypassAdvisor.advise(snapshot.corridor),
         )
@@ -85,42 +70,27 @@ class SceneDescriber @Inject constructor(
 
     private fun lateralHints(corridor: CorridorState): String? {
         val hints = mutableListOf<String>()
-        if (corridor.leftProximity >= 0.42f) {
+        if (corridor.leftProximity >= 0.38f) {
             val d = SpatialPhraseBuilder.formatDistance(
-                SpatialPhraseBuilder.estimateMeters(proximity = corridor.leftProximity),
+                SpatialPhraseBuilder.estimateMeters(
+                    proximity = corridor.leftProximity,
+                    frontalSeverity = corridor.frontalSeverity * 0.5f,
+                    closeRange = corridor.frontalCloseRange,
+                ),
             )
             hints += "pared u obstáculo a $d a tu izquierda"
         }
-        if (corridor.rightProximity >= 0.42f) {
+        if (corridor.rightProximity >= 0.38f) {
             val d = SpatialPhraseBuilder.formatDistance(
-                SpatialPhraseBuilder.estimateMeters(proximity = corridor.rightProximity),
+                SpatialPhraseBuilder.estimateMeters(
+                    proximity = corridor.rightProximity,
+                    frontalSeverity = corridor.frontalSeverity * 0.5f,
+                    closeRange = corridor.frontalCloseRange,
+                ),
             )
             hints += "pared u obstáculo a $d a tu derecha"
         }
         if (hints.isEmpty()) return null
         return hints.joinToString(", ")
-    }
-
-    private fun formatObjectsSpatial(objects: List<String>, corridor: CorridorState): String {
-        val primary = SpatialPhraseBuilder.seeObjectPhrase(objects.first(), corridor)
-        if (objects.size == 1) return primary
-
-        val others = objects.drop(1).joinToString(" y ") { SpatialPhraseBuilder.articleFor(it) }
-        val side = SpatialPhraseBuilder.inferSide(corridor)
-        val distance = SpatialPhraseBuilder.formatDistance(
-            SpatialPhraseBuilder.distanceForCorridor(corridor) + 1f,
-        )
-        return "$primary. También veo $others a $distance $side"
-    }
-
-    companion object {
-        private val REDUNDANT_OBJECTS = setOf(
-            "puerta",
-            "pared",
-            "vía",
-            "edificio",
-            "obstáculo",
-            "escaleras",
-        )
     }
 }

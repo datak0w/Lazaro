@@ -1,5 +1,6 @@
 package io.lazaro.pathguide
 
+import io.lazaro.navigation.BlindNavigationPhraseBuilder
 import io.lazaro.navigation.TurnSide
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -69,7 +70,7 @@ class TurnAlignmentGuide @Inject constructor(
         val expected = expectedNavigationDegrees(side)
         val turned = rotationTracker.yawDeltaDeg()
         val imuRemaining = expected - turned
-        val remaining = imuRemaining * 0.70f + visualCorridorDeg * 0.30f
+        val remaining = imuRemaining * 0.75f + visualCorridorDeg * 0.25f
 
         return buildState(
             remainingDeg = remaining,
@@ -82,7 +83,7 @@ class TurnAlignmentGuide @Inject constructor(
     private fun fuseAndBuild(visualTargetDeg: Float, mode: GuideMode): TurnAlignmentState {
         val turned = rotationTracker.yawDeltaDeg()
         val imuRemaining = visualTargetDeg - turned
-        val remaining = imuRemaining * 0.50f + visualTargetDeg * 0.50f
+        val remaining = imuRemaining * 0.65f + visualTargetDeg * 0.35f
         return buildState(remaining, turned, visualTargetDeg, mode)
     }
 
@@ -94,6 +95,7 @@ class TurnAlignmentGuide @Inject constructor(
     ): TurnAlignmentState {
         val tier = tierFor(remainingDeg)
         val aligned = abs(remainingDeg) <= alignedThreshold(mode)
+        val (guideLeft, guideRight, continuous) = guideBeepsFor(remainingDeg, aligned)
 
         if (aligned) {
             if (!alignedAnnounced) {
@@ -105,7 +107,11 @@ class TurnAlignmentGuide @Inject constructor(
                     turnedDeg = turnedDeg,
                     visualTargetDeg = visualTargetDeg,
                     aligned = true,
+                    justAligned = true,
                     voiceCue = alignedCue(mode),
+                    guideLeftBeep = 0f,
+                    guideRightBeep = 0f,
+                    continuousGuide = false,
                 )
             }
             return TurnAlignmentState(
@@ -130,7 +136,32 @@ class TurnAlignmentGuide @Inject constructor(
             visualTargetDeg = visualTargetDeg,
             aligned = false,
             voiceCue = voiceCue,
+            guideLeftBeep = guideLeft,
+            guideRightBeep = guideRight,
+            continuousGuide = continuous,
         )
+    }
+
+    /**
+     * Pitido en el lado hacia el que debe girar.
+     * Más fuerte y continuo cuanto mayor sea el error angular.
+     */
+    private fun guideBeepsFor(remainingDeg: Float, aligned: Boolean): Triple<Float, Float, Boolean> {
+        if (aligned) return Triple(0f, 0f, false)
+        val mag = abs(remainingDeg)
+        if (mag < FINE_DEG) return Triple(0f, 0f, false)
+
+        val strength = when {
+            mag >= COARSE_DEG -> 0.92f
+            mag >= FINE_DEG * 1.6f -> 0.75f
+            else -> 0.58f
+        }
+        val continuous = mag >= FINE_DEG
+        return if (remainingDeg < 0f) {
+            Triple(strength, 0f, continuous)
+        } else {
+            Triple(0f, strength, continuous)
+        }
     }
 
     private fun tierFor(remainingDeg: Float): TurnAlignmentTier {
@@ -152,26 +183,8 @@ class TurnAlignmentGuide @Inject constructor(
         val now = System.currentTimeMillis()
         if (!tierChanged && now - lastTierMs < tierDebounce(mode)) return null
 
-        val magnitude = abs(remainingDeg)
-        val message = when (tier) {
-            TurnAlignmentTier.COARSE_LEFT -> if (magnitude > 22f) {
-                "Gira a la izquierda."
-            } else {
-                "Gira un poco a la izquierda."
-            }
-
-            TurnAlignmentTier.FINE_LEFT -> "Un poco más a la izquierda."
-
-            TurnAlignmentTier.COARSE_RIGHT -> if (magnitude > 22f) {
-                "Gira a la derecha."
-            } else {
-                "Gira un poco a la derecha."
-            }
-
-            TurnAlignmentTier.FINE_RIGHT -> "Un poco más a la derecha."
-
-            TurnAlignmentTier.ALIGNED -> null
-        } ?: return null
+        val message = BlindNavigationPhraseBuilder.imuTurnTip(remainingDeg, navTurnSide)
+            ?: return null
 
         return DoorwayVoiceCue(
             message = message,
@@ -182,8 +195,8 @@ class TurnAlignmentGuide @Inject constructor(
 
     private fun alignedCue(mode: GuideMode): DoorwayVoiceCue {
         val message = when (mode) {
-            GuideMode.DOORWAY -> "Perfecto. Ve adelante."
-            GuideMode.NAVIGATION -> "Perfecto. Sigue recto."
+            GuideMode.DOORWAY -> "Perfecto. Camina hacia adelante."
+            GuideMode.NAVIGATION -> "Perfecto. Camina hacia adelante."
         }
         return DoorwayVoiceCue(
             message = message,
@@ -227,10 +240,10 @@ class TurnAlignmentGuide @Inject constructor(
         private const val FINE_DEG = 5f
         private const val COARSE_DEG = 12f
         private const val DOORWAY_ALIGNED_DEG = 4.5f
-        private const val NAV_ALIGNED_DEG = 14f
-        private const val NAV_TURN_EXPECTED_DEG = 68f
-        private const val DOORWAY_TIER_DEBOUNCE_MS = 3_500L
-        private const val NAV_TIER_DEBOUNCE_MS = 4_500L
+        private const val NAV_ALIGNED_DEG = 12f
+        private const val NAV_TURN_EXPECTED_DEG = 70f
+        private const val DOORWAY_TIER_DEBOUNCE_MS = 4_000L
+        private const val NAV_TIER_DEBOUNCE_MS = 5_000L
         private const val ALIGNED_DEBOUNCE_MS = 8_000L
     }
 }

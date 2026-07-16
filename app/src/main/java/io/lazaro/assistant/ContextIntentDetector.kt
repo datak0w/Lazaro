@@ -38,9 +38,23 @@ class ContextIntentDetector @Inject constructor() {
         return if (wake.detected) wake.command else text.trim()
     }
 
+    /**
+     * «Para» / «detener» como **orden corta**, no substring.
+     * Así «llévame para casa» o «prepárate» no se cancelan.
+     */
     fun isInterruptCommand(text: String): Boolean {
         val normalized = normalize(stripWakeWord(text))
-        return matchesAny(normalized, INTERRUPT_TRIGGERS)
+        if (normalized.isBlank()) return false
+        if (normalized in INTERRUPT_EXACT) return true
+        if (INTERRUPT_PHRASES.any { normalized == it || normalized.startsWith("$it ") }) return true
+        // Token entero: "para" / "parar" / "detente" / "stop"…
+        val tokens = normalized.split(" ")
+        if (tokens.size <= 3 && tokens.any { it in INTERRUPT_TOKENS }) {
+            // Frases cortas de stop: "para", "para ya", "lazaro para", "por favor para"
+            val content = tokens.filter { it !in FILLER_TOKENS }
+            return content.isNotEmpty() && content.all { it in INTERRUPT_TOKENS || it in STOP_MODIFIERS }
+        }
+        return false
     }
 
     fun isNavigationStopPhrase(text: String): Boolean {
@@ -128,14 +142,37 @@ class ContextIntentDetector @Inject constructor() {
             "dejalo estar", "olvidate",
         )
 
-        private val INTERRUPT_TRIGGERS = listOf(
-            "para", "parar", "detente", "stop", "callate", "cállate", "silencio",
-            "interrumpe", "interrumpir", "para todo", "para la accion",
+        /** Frases exactas cortas de interrupt → standby. */
+        private val INTERRUPT_EXACT = setOf(
+            "para", "parar", "detente", "detener", "stop",
+            "callate", "silencio", "interrumpe", "interrumpir",
+            "para todo", "para ya", "para ahora", "parar todo",
+            "para la accion", "basta", "ya esta",
+        )
+
+        private val INTERRUPT_PHRASES = listOf(
+            "para todo", "para ya", "parar todo", "detente ya",
+            "callate ya", "basta ya",
+        )
+
+        private val INTERRUPT_TOKENS = setOf(
+            "para", "parar", "detente", "detener", "stop",
+            "callate", "silencio", "interrumpe", "interrumpir", "basta",
+        )
+
+        private val STOP_MODIFIERS = setOf(
+            "todo", "ya", "ahora", "por", "favor", "la", "accion", "actividad",
+        )
+
+        private val FILLER_TOKENS = setOf(
+            "por", "favor", "eh", "este", "oye", "a",
         )
 
         private val NAVIGATION_STOP_TRIGGERS = listOf(
             "parar navegacion", "terminar navegacion", "cancelar ruta",
             "salir de maps", "cerrar maps", "cerrar navegacion", "fin de ruta",
+            "terminar paseo", "parar paseo", "para el paseo",
+            "para la navegacion", "para navegacion",
         )
 
         private val HELP_TRIGGERS = listOf(

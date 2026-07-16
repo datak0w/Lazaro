@@ -80,6 +80,18 @@ class PathGuideController @Inject constructor(
     private var lastOutdoorPhase: OutdoorNavPhase? = null
     private var lastRoadSide: RoadSide = RoadSide.UNKNOWN
     private var lastSafeSide: RoadSide = RoadSide.UNKNOWN
+    private var lastSidewalkAlignment: SidewalkAlignment = SidewalkAlignment.UNKNOWN
+    private var lastDriftScore: Float = 0f
+    private var lastCenteringScore: Float = 0.5f
+    private var lastInSafeZone: Boolean = false
+    private var lastGuideLeftBeep: Float = 0f
+    private var lastGuideRightBeep: Float = 0f
+    private var lastSidewalkLeftNorm: Float = 0.22f
+    private var lastSidewalkRightNorm: Float = 0.78f
+    private var lastLateralOffsetNorm: Float = 0f
+    private var lastWalkableConfidence: Float = 0f
+    private var lastPerceptionSource: PerceptionSource = PerceptionSource.MONOCULAR
+    private var lastFrontalDistanceM: Float? = null
     private var lastMapsInstructionType: MapsInstructionType = MapsInstructionType.OTHER
     private var announcing = false
     private var duckJob: Job? = null
@@ -94,14 +106,17 @@ class PathGuideController @Inject constructor(
         }
         scope.launch {
             textToSpeechManager.isSpeaking.collect { speaking ->
-                val duck = when {
-                    announcing -> true
-                    _mode.value == PathGuideMode.NAVEGACION || _mode.value == PathGuideMode.RUTA ->
-                        navigationAudioCoordinator.shouldDuckBeeps()
-                    _mode.value != PathGuideMode.OFF && speaking -> true
-                    else -> false
-                }
-                stereoBeepEngine.setPaused(duck)
+                val streetGuide = _mode.value == PathGuideMode.PASEO ||
+                    _mode.value == PathGuideMode.NAVEGACION ||
+                    _mode.value == PathGuideMode.RUTA ||
+                    _mode.value == PathGuideMode.DEBUG ||
+                    _mode.value == PathGuideMode.GRABANDO
+                // En calle: no callar por TTS genérico; solo Maps o anuncio activo.
+                stereoBeepEngine.setPaused(
+                    announcing ||
+                        (streetGuide && navigationAudioCoordinator.shouldDuckBeeps()) ||
+                        (!streetGuide && _mode.value != PathGuideMode.OFF && speaking),
+                )
             }
         }
         rearCameraAnalyzer.setFrameListener { gray, width, height, image ->
@@ -147,10 +162,14 @@ class PathGuideController @Inject constructor(
         }
 
         stereoBeepEngine.setVolume(config.volume)
+        val streetMode = mode == PathGuideMode.PASEO ||
+            mode == PathGuideMode.NAVEGACION ||
+            mode == PathGuideMode.RUTA ||
+            mode == PathGuideMode.DEBUG ||
+            mode == PathGuideMode.GRABANDO
+        outdoorNavigationBrain.setDepthEnabled(streetMode && config.depthEnhancedGuidance)
         deviceRotationTracker.start()
-        if (mode != PathGuideMode.DEBUG) {
-            stereoBeepEngine.start()
-        }
+        stereoBeepEngine.start()
 
         foregroundBridge.promoteCameraForeground(includeCamera = true)
 
@@ -207,13 +226,18 @@ class PathGuideController @Inject constructor(
             val currentMode = _mode.value
 
             val brain = when (currentMode) {
-                PathGuideMode.NAVEGACION -> outdoorNavigationBrain.update(
+                PathGuideMode.NAVEGACION,
+                PathGuideMode.PASEO,
+                PathGuideMode.DEBUG,
+                PathGuideMode.GRABANDO,
+                -> outdoorNavigationBrain.update(
                     gray = gray,
                     width = width,
                     height = height,
                     corridor = corridor,
                     deltaMs = delta,
                     config = config,
+                    image = image,
                     now = now,
                 )
                 PathGuideMode.RUTA -> buildRouteReplayBrain(
@@ -222,6 +246,7 @@ class PathGuideController @Inject constructor(
                     height = height,
                     corridor = corridor,
                     deltaMs = delta,
+                    image = image,
                     now = now,
                 )
                 else -> exitPriorityBrain.update(
@@ -241,13 +266,33 @@ class PathGuideController @Inject constructor(
             lastOutdoorPhase = brain.outdoorPhase
             lastRoadSide = brain.roadSide
             lastSafeSide = brain.safeSide
+            lastSidewalkAlignment = brain.sidewalkAlignment
+            lastDriftScore = brain.driftScore
+            lastCenteringScore = brain.centeringScore
+            lastInSafeZone = brain.inSafeZone
+            lastGuideLeftBeep = brain.leftBeep
+            lastGuideRightBeep = brain.rightBeep
+            lastSidewalkLeftNorm = brain.sidewalkLeftNorm
+            lastSidewalkRightNorm = brain.sidewalkRightNorm
+            lastLateralOffsetNorm = brain.lateralOffsetNorm
+            lastWalkableConfidence = brain.walkableConfidence
+            lastPerceptionSource = brain.perceptionSource
+            lastFrontalDistanceM = brain.frontalDistanceM
             lastMapsInstructionType = brain.mapsInstructionType
 
             if (currentMode == PathGuideMode.GRABANDO) {
                 handleRecordingFrame(corridor, brain, now)
             }
+            if (currentMode == PathGuideMode.RUTA) {
+                handlePassiveLearnFrame(corridor, brain, now)
+            }
 
-            if (currentMode != PathGuideMode.NAVEGACION && currentMode != PathGuideMode.RUTA) {
+            if (currentMode != PathGuideMode.NAVEGACION &&
+                currentMode != PathGuideMode.PASEO &&
+                currentMode != PathGuideMode.RUTA &&
+                currentMode != PathGuideMode.DEBUG &&
+                currentMode != PathGuideMode.GRABANDO
+            ) {
                 exitPriorityBrain.trackFrontalBlocked(corridor.isFrontallyBlocked, delta)
             }
 
@@ -263,64 +308,87 @@ class PathGuideController @Inject constructor(
                 routeMatch = routeMatch,
             )
 
+            // Preview DEBUG: aplica pitidos de acera/giro
             if (_mode.value == PathGuideMode.DEBUG) {
-                return
-            }
-
-            if (shouldSilenceBeepsForMaps()) {
-                stereoBeepEngine.update(0f, 0f)
-            } else if (brain.isExitGuiding && config.doorwayAlertsEnabled) {
-                val (left, right) = applyNavigationTurnBias(brain.leftBeep, brain.rightBeep)
                 stereoBeepEngine.update(
-                    left,
-                    right,
+                    brain.leftBeep,
+                    brain.rightBeep,
                     doorwayMode = brain.doorwayMode,
                     continuousTone = brain.continuousTone,
                     warningMode = brain.warningMode,
+                    guidanceMode = brain.guidanceMode,
                 )
-                val voiceCue = if (currentMode == PathGuideMode.NAVEGACION || currentMode == PathGuideMode.RUTA) {
-                    brain.voiceCue?.takeIf { canSpeakPathGuide(urgent = brain.voiceCue.cueId.startsWith("imu_") || brain.voiceCue.cueId.startsWith("route_")) }
-                } else {
-                    brain.voiceCue
+                brain.voiceCue?.takeIf { it.cueId.startsWith("outdoor_") || it.cueId.startsWith("imu_") }
+                    ?.let { maybeAnnounceExitCue(it) }
+                if (brain.justAligned) onAlignedSuccess()
+                return
+            }
+
+            if (brain.justAligned) {
+                onAlignedSuccess()
+            }
+
+            val streetMode = currentMode == PathGuideMode.NAVEGACION ||
+                currentMode == PathGuideMode.PASEO ||
+                currentMode == PathGuideMode.RUTA
+
+            if (shouldSilenceBeepsForMaps() &&
+                brain.outdoorPhase != OutdoorNavPhase.DRIFT_WARNING &&
+                brain.sidewalkAlignment != SidewalkAlignment.ON_ROAD &&
+                brain.sidewalkAlignment != SidewalkAlignment.DRIFTING_TO_ROAD &&
+                brain.leftBeep < 0.05f && brain.rightBeep < 0.05f
+            ) {
+                stereoBeepEngine.update(0f, 0f)
+            } else if (brain.isExitGuiding || streetMode || currentMode == PathGuideMode.GRABANDO) {
+                // Pitidos espaciales siempre (paseo / nav / grabación)
+                stereoBeepEngine.update(
+                    brain.leftBeep,
+                    brain.rightBeep,
+                    doorwayMode = true, // umbral más sensible para guía
+                    continuousTone = brain.continuousTone ||
+                        brain.leftBeep >= 0.50f ||
+                        brain.rightBeep >= 0.50f,
+                    warningMode = brain.warningMode,
+                    guidanceMode = brain.guidanceMode,
+                )
+                val voiceCue = brain.voiceCue?.takeIf { cue ->
+                    cue.cueId !in SIDEWALK_VOICE_BLOCKLIST &&
+                        cue.cueId != "imu_aligned" && (
+                        cue.cueId.startsWith("imu_") ||
+                            cue.cueId.contains("coarse") ||
+                            cue.cueId.startsWith("outdoor_cross") ||
+                            cue.cueId.startsWith("outdoor_junction") ||
+                            cue.cueId.startsWith("outdoor_arriv") ||
+                            cue.cueId.startsWith("route_")
+                        )
+                }?.takeIf { cue ->
+                    currentMode == PathGuideMode.PASEO ||
+                        currentMode == PathGuideMode.GRABANDO ||
+                        canSpeakPathGuide(
+                            urgent = cue.cueId.startsWith("imu_") ||
+                                cue.cueId.startsWith("route_obstacle"),
+                        )
                 }
                 maybeAnnounceExitCue(voiceCue)
-                if (maybeDescribeScene(
-                        image = image,
-                        corridor = corridor,
-                        doorwayPhase = brain.doorwayPhase,
-                        now = now,
-                        allowDuringDoorway = false,
-                        suppressScene = brain.suppressScene,
-                    )
-                ) {
-                    closeInFinally = false
-                }
                 return
             } else {
-                val (left, right) = applyNavigationTurnBias(brain.leftBeep, brain.rightBeep)
                 stereoBeepEngine.update(
-                    left,
-                    right,
+                    brain.leftBeep,
+                    brain.rightBeep,
                     doorwayMode = brain.doorwayMode,
+                    continuousTone = brain.continuousTone,
                     warningMode = brain.warningMode,
+                    guidanceMode = brain.guidanceMode,
                 )
-                brain.voiceCue?.let { cue ->
-                    if (canSpeakPathGuide(urgent = cue.cueId.startsWith("imu_"))) {
+                brain.voiceCue?.takeIf {
+                    it.cueId != "imu_aligned" &&
+                        it.cueId !in SIDEWALK_VOICE_BLOCKLIST &&
+                        it.cueId.contains("coarse")
+                }?.let { cue ->
+                    if (canSpeakPathGuide(urgent = false)) {
                         maybeAnnounceExitCue(cue)
                     }
                 }
-            }
-
-            if (maybeDescribeScene(
-                    image = image,
-                    corridor = corridor,
-                    doorwayPhase = brain.doorwayPhase,
-                    now = now,
-                    allowDuringDoorway = true,
-                    suppressScene = brain.suppressScene,
-                )
-            ) {
-                closeInFinally = false
             }
 
             if (corridor.isFrontallyBlocked && corridor.doorwayActive) {
@@ -330,19 +398,14 @@ class PathGuideController @Inject constructor(
 
             if (brain.shouldAnnounceFrontal && !announcing && canSpeakPathGuide(urgent = true)) {
                 announcing = true
-                closeInFinally = false
                 val snapshotCorridor = corridor
                 scope.launch {
                     try {
                         stereoBeepEngine.setPaused(true)
-                        val sceneLabels = obstacleLabeler.analyzeScene(image)
-                        lastLabel = sceneLabels.primaryOrDefault()
-                        if (sceneLabels.items.isEmpty() && snapshotCorridor.frontalSeverity < 0.36f) {
-                            return@launch
-                        }
+                        io.lazaro.navigation.TurnHapticFeedback.pulseObstacle(context)
                         val advice = bypassAdvisor.advise(snapshotCorridor)
                         val message = SpatialPhraseBuilder.frontalObstaclePhrase(
-                            label = sceneLabels.primaryOrDefault(),
+                            label = "obstáculo",
                             corridor = snapshotCorridor,
                             advice = advice,
                             mode = _mode.value,
@@ -352,13 +415,10 @@ class PathGuideController @Inject constructor(
                     } catch (e: Exception) {
                         Log.e(TAG, "Error anunciando obstáculo frontal", e)
                     } finally {
-                        try {
-                            image.close()
-                        } catch (_: Exception) {
-                        }
                         announcing = false
                         frontalStableMs = 0L
                         exitPriorityBrain.onFrontalAnnounced()
+                        refreshBeepPause()
                     }
                 }
                 return
@@ -375,6 +435,20 @@ class PathGuideController @Inject constructor(
         }
     }
 
+    private fun onAlignedSuccess() {
+        stereoBeepEngine.playSuccessCoin()
+        io.lazaro.navigation.TurnHapticFeedback.pulseAligned(context)
+        if (!announcing && canSpeakPathGuide(urgent = true)) {
+            maybeAnnounceExitCue(
+                DoorwayVoiceCue(
+                    message = "Perfecto. Sigue recto.",
+                    debounceMs = 8_000L,
+                    cueId = "imu_aligned",
+                ),
+            )
+        }
+    }
+
     private fun maybeDescribeScene(
         image: ImageProxy,
         corridor: CorridorState,
@@ -383,60 +457,9 @@ class PathGuideController @Inject constructor(
         allowDuringDoorway: Boolean,
         suppressScene: Boolean = false,
     ): Boolean {
-        if (!config.sceneDescriptionsEnabled) return false
-        if (announcing || sceneDescriptionPending || suppressScene) return false
-        if (!allowDuringDoorway && corridor.doorwayActive) return false
-        if (!navigationAudioCoordinator.canSceneDescription(now)) return false
-
-        val intervalSec = navigationAudioCoordinator.sceneDescriptionIntervalSec(
-            config.sceneDescriptionIntervalSec,
-        )
-        val intervalMs = intervalSec.coerceIn(15, 120) * 1_000L
-        if (now - lastSceneDescriptionMs < intervalMs) return false
-
-        lastSceneDescriptionMs = now
-        sceneDescriptionPending = true
-        val snapshotCorridor = corridor
-        val snapshotDoorwayPhase = doorwayPhase
-
-        scope.launch {
-            try {
-                val labels = obstacleLabeler.analyzeScene(image)
-                val snapshot = SceneSnapshot(
-                    labels = labels,
-                    corridor = snapshotCorridor,
-                    stairDetected = false,
-                    doorwayActive = snapshotCorridor.doorwayActive,
-                    doorwayPhase = snapshotDoorwayPhase,
-                    frontal = FrontalObstacleState(
-                        blocked = snapshotCorridor.isFrontallyBlocked,
-                        severity = snapshotCorridor.frontalSeverity,
-                        closeRange = snapshotCorridor.frontalCloseRange,
-                    ),
-                )
-                val description = sceneDescriber.describe(
-                    snapshot = snapshot,
-                    mapsInstruction = navigationAudioCoordinator.lastMapsInstruction.value,
-                )
-                lastSceneDescription = description
-                if (!announcing && canSpeakPathGuide(urgent = false)) {
-                    stereoBeepEngine.setPaused(true)
-                    sceneDescriptionAnnouncer.announce(
-                        message = description,
-                        minIntervalMs = intervalMs,
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error describiendo escena", e)
-            } finally {
-                sceneDescriptionPending = false
-                try {
-                    image.close()
-                } catch (_: Exception) {
-                }
-            }
-        }
-        return true
+        // Identificación de objetos / descripciones de escena desactivadas:
+        // priorizamos pitidos + IMU para navegación.
+        return false
     }
 
     private fun maybeAnnounceExitCue(cue: DoorwayVoiceCue?) {
@@ -457,8 +480,20 @@ class PathGuideController @Inject constructor(
                 Log.e(TAG, "Error anunciando guía de salida", e)
             } finally {
                 announcing = false
+                refreshBeepPause()
             }
         }
+    }
+
+    private fun refreshBeepPause() {
+        val streetGuide = _mode.value == PathGuideMode.PASEO ||
+            _mode.value == PathGuideMode.NAVEGACION ||
+            _mode.value == PathGuideMode.RUTA ||
+            _mode.value == PathGuideMode.DEBUG ||
+            _mode.value == PathGuideMode.GRABANDO
+        stereoBeepEngine.setPaused(
+            announcing || (streetGuide && navigationAudioCoordinator.shouldDuckBeeps()),
+        )
     }
 
     private fun maybeAnnounceDoorwayCue(cue: DoorwayVoiceCue?) {
@@ -503,6 +538,14 @@ class PathGuideController @Inject constructor(
                 outdoorPhase = lastOutdoorPhase,
                 roadSide = lastRoadSide,
                 safeSide = lastSafeSide,
+                sidewalkAlignment = lastSidewalkAlignment,
+                driftScore = lastDriftScore,
+                centeringScore = lastCenteringScore,
+                inSafeZone = lastInSafeZone,
+                guideLeftBeep = lastGuideLeftBeep,
+                guideRightBeep = lastGuideRightBeep,
+                sidewalkLeftNorm = lastSidewalkLeftNorm,
+                sidewalkRightNorm = lastSidewalkRightNorm,
                 mapsInstructionType = lastMapsInstructionType,
                 stairPeaks = 0,
                 routeMatchConfidence = routeMatch?.confidence,
@@ -510,6 +553,10 @@ class PathGuideController @Inject constructor(
                 routeInReplaySegment = routeMatch?.inReplaySegment == true,
                 routeExpectedLeftP = routeMatch?.expectedPoint?.leftP,
                 routeExpectedRightP = routeMatch?.expectedPoint?.rightP,
+                lateralOffsetNorm = lastLateralOffsetNorm,
+                walkableConfidence = lastWalkableConfidence,
+                perceptionSource = lastPerceptionSource,
+                frontalDistanceM = lastFrontalDistanceM,
                 updatedAtMs = now,
             )
         } catch (e: Exception) {
@@ -557,14 +604,51 @@ class PathGuideController @Inject constructor(
         now: Long,
     ) {
         val fix = lastGpsFix ?: return
+        val obstacle = when {
+            !lastLabel.isNullOrBlank() -> lastLabel
+            corridor.isFrontallyBlocked && corridor.frontalSeverity >= 0.45f -> "obstáculo"
+            else -> null
+        }
+        if (obstacle != null) {
+            lastLabel = obstacle
+        }
         routeRecorderController.get().onCorridorSample(
             corridor = corridor,
             junction = brain.junctionType,
             safeSide = brain.safeSide,
             roadSide = brain.roadSide,
-            obstacleLabel = lastLabel,
+            obstacleLabel = obstacle,
             lat = fix.lat,
             lng = fix.lng,
+        )
+        if (now - lastRouteFlushMs >= RECORDING_FLUSH_MS) {
+            lastRouteFlushMs = now
+            routeRecorderController.get().appendPeriodicFlush()
+        }
+    }
+
+    private fun handlePassiveLearnFrame(
+        corridor: CorridorState,
+        brain: ExitBrainFrameResult,
+        now: Long,
+    ) {
+        val match = routeReplayBrain.currentMatch() ?: return
+        if (!match.inReplaySegment || match.confidence < 0.55f) return
+        val fix = lastGpsFix ?: return
+        val obstacle = when {
+            !lastLabel.isNullOrBlank() -> lastLabel
+            corridor.isFrontallyBlocked && corridor.frontalSeverity >= 0.45f -> "obstáculo"
+            else -> null
+        }
+        routeRecorderController.get().onCorridorSample(
+            corridor = corridor,
+            junction = brain.junctionType,
+            safeSide = brain.safeSide,
+            roadSide = brain.roadSide,
+            obstacleLabel = obstacle,
+            lat = fix.lat,
+            lng = fix.lng,
+            phase = "REPLAY_LEARN",
         )
         if (now - lastRouteFlushMs >= RECORDING_FLUSH_MS) {
             lastRouteFlushMs = now
@@ -578,6 +662,7 @@ class PathGuideController @Inject constructor(
         height: Int,
         corridor: CorridorState,
         deltaMs: Long,
+        image: ImageProxy,
         now: Long,
     ): ExitBrainFrameResult {
         val fix = lastGpsFix
@@ -614,6 +699,7 @@ class PathGuideController @Inject constructor(
                 corridor = corridor,
                 deltaMs = deltaMs,
                 config = config,
+                image = image,
                 now = now,
             )
         }
@@ -627,5 +713,23 @@ class PathGuideController @Inject constructor(
         private const val TAG = "PathGuideController"
         private const val DEBUG_FRAME_MS = 200L
         private const val RECORDING_FLUSH_MS = 8_000L
+        private val STREET_URGENT_CUES = setOf(
+            "outdoor_crosswalk",
+            "outdoor_cross_search",
+            "outdoor_crossing",
+            "outdoor_junction",
+            "outdoor_arrive",
+            "route_obstacle",
+            "route_drift",
+        )
+
+        /** Acera/calzada: solo pitidos, nunca voz. */
+        private val SIDEWALK_VOICE_BLOCKLIST = setOf(
+            "outdoor_road",
+            "outdoor_drift",
+            "outdoor_recovered",
+            "outdoor_hug",
+            "outdoor_sidewalk",
+        )
     }
 }

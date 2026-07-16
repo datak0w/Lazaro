@@ -69,6 +69,7 @@ class RouteRecordingSampler @Inject constructor(
         roadSide: RoadSide,
         segmentType: String,
         obstacleLabel: String?,
+        phase: String = "RECORDING",
         now: Long = System.currentTimeMillis(),
     ): RouteObservation? {
         if (runId == 0L) return null
@@ -91,7 +92,7 @@ class RouteRecordingSampler @Inject constructor(
             safeSide = safeSide.toStorage(),
             roadSide = roadSide.toStorage(),
             junction = junction.toStorage(),
-            phase = "RECORDING",
+            phase = phase,
             segmentType = segmentType,
             obstacleLabel = obstacleLabel,
             distanceAlongM = distanceAlongM,

@@ -69,10 +69,12 @@ Lazaro AI usa **Google Gemini** de forma **responsable y acotada**:
 - [Comandos de voz completos](#-comandos-de-voz-completos)
 - [Navegación accesible](#-navegación-accesible)
 - [Guía por cámara y rutas grabadas](#-guía-por-cámara-y-rutas-grabadas)
+- [Navegación con pitidos en acera](#-navegación-con-pitidos-en-acera)
 - [Sitios favoritos](#-sitios-favoritos)
 - [Instalación](#-instalación)
 - [Permisos](#-permisos-necesarios)
 - [Para desarrolladores](#-para-desarrolladores)
+- [Bibliografía y estudios consultados](#-bibliografía-y-estudios-consultados)
 - [Contribuir](#-contribuir)
 - [Licencia](#-licencia)
 
@@ -150,10 +152,13 @@ Lazaro AI usa **Google Gemini** de forma **responsable y acotada**:
 | Función | Qué hace |
 |---------|----------|
 | **Pitidos estéreo** | Más sonido a izquierda o derecha según el espacio libre |
+| **Corrección lateral en acera** | Guía proporcional para mantener la línea recta (offset lateral) |
 | **Obstáculos** | Detecta coches, postes, escalones y los nombra |
 | **Descripción de escena** | *«Camino despejado»*, *«Puerta a la derecha»*… |
-| **Salidas y puertas** | Guía para encontrar y cruzar entradas |
+| **Salidas y puertas** | Guía para encontrar y cruzar entradas (interior y exterior) |
+| **Bifurcaciones** | Pitidos hacia la rama más abierta o la indicada por Maps |
 | **Navegación exterior** | Acera, cruces peatonales, alineación en calle |
+| **Profundidad (Pixel 9)** | LDAF/autofocus para distancia frontal; ARCore reservado |
 
 ---
 
@@ -332,6 +337,49 @@ La cámara trasera analiza el espacio y emite **pitidos** más fuertes hacia don
 
 ---
 
+## 🚶 Navegación con pitidos en acera
+
+Lazaro AI guía el **centrado lateral** en la acera con pitidos estéreo. La lógica corre **en el móvil**, sin nube.
+
+### Cómo interpretar los pitidos
+
+| Señal | Significado |
+|-------|-------------|
+| **Silencio** | Vas bien centrado en el corredor caminable |
+| **Pitido izquierdo** | Desviarte un poco a la **derecha** |
+| **Pitido derecho** | Desviarte un poco a la **izquierda** |
+| **Ambos lados** | Paso estrecho: sigue recto con cuidado |
+| **Tono continuo de alerta** | Te acercas a la **calzada** — vuelve hacia la fachada |
+
+### Pipeline técnico (resumen)
+
+```
+Cámara trasera (CameraX)
+        ↓
+WalkableCorridorEstimator   ← IPM monocular + bordes (A34)
+        ↓                   ← profundidad LDAF / ARCore (Pixel 9, opcional)
+LateralGuidanceController   ← error lateral → pitidos proporcionales
+        ↓
+OutdoorNavigationBrain      ← acera, puertas, bifurcaciones, Maps
+        ↓
+StereoBeepEngine            ← salida estéreo L/R
+```
+
+### Hardware recomendado
+
+| Dispositivo | Rol | Capacidades |
+|-------------|-----|-------------|
+| **Samsung Galaxy A34** | Desarrollo y pruebas | Cámara + IMU (pipeline monocular) |
+| **Google Pixel 9** | Cliente final | LDAF (distancia frontal puntual) + ARCore Depth (fase 2) |
+
+> **Nota:** el LDAF del Pixel 9 da **un punto de distancia** (autofocus), no un mapa completo. Sirve para obstáculos frontales cercanos; la guía lateral usa visión monocular y, en el futuro, profundidad ARCore.
+
+### Pantalla DEBUG
+
+En ajustes de PathGuide puedes ver: offset lateral, bordes estimados, intensidad L/R, fuente de percepción (`monocular` / `fusionada` / `profundidad`).
+
+---
+
 ## 📌 Sitios favoritos
 
 Guarda puntos concretos con el GPS del momento:
@@ -421,7 +469,21 @@ GeminiOrchestrator → ActionExecutor
               PathGuideController ← Cámara + pitidos
 ```
 
-**Stack:** Kotlin · Jetpack Compose · Hilt · Room · Gemini · Vosk · ML Kit · CameraX
+**Stack:** Kotlin · Jetpack Compose · Hilt · Room · Gemini · Vosk · ML Kit · CameraX · ARCore
+
+### Módulos PathGuide (navegación espacial)
+
+| Módulo | Función |
+|--------|---------|
+| `WalkableCorridorEstimator` | Estima centro y bordes del corredor caminable (IPM + bordes) |
+| `LateralGuidanceController` | Convierte offset lateral en pitidos proporcionales L/R |
+| `OutdoorNavigationBrain` | Orquesta acera, puertas, bifurcaciones y Maps |
+| `SidewalkNotificationSystem` | Alertas de calzada y recuperación |
+| `JunctionBeepGuide` | Pitidos en bifurcaciones (T) |
+| `DoorwayGuideProtocol` | Alineación para cruzar puertas |
+| `DepthPerceptionProvider` | LDAF (Pixel 9) + ARCore Depth (fase 2) |
+| `FocusDistanceProbe` | Distancia focal vía Camera2Interop |
+| `StereoBeepEngine` | Sonificación estéreo continua |
 
 ### Estructura del código
 
@@ -442,6 +504,49 @@ app/src/main/java/io/lazaro/
 ├── tools/         # Tiempo, calculadora, clima
 └── receipt/       # Lectura de tickets
 ```
+
+---
+
+## 📚 Bibliografía y estudios consultados
+
+Investigación y referencias que han guiado el diseño de la **navegación con pitidos** y la guía por acera en Lazaro AI:
+
+### Seguimiento de corredor y acera
+
+| Referencia | Enlace | Aplicación en Lazaro |
+|------------|--------|----------------------|
+| **Corridor-Walker** — path following con audio espacial (MobileHCI 2022) | [PDF](https://www.masakikuribayashi.com/data/project/masaki_kuribayashi_mobilehci_2022/paper.pdf) | Wall-following virtual: mantener distancia al borde del corredor |
+| **StreetNav** — anti-veering en exterior (arXiv 2023) | [doi:10.48550/arxiv.2310.00491](https://doi.org/10.48550/arxiv.2310.00491) | Reducir deriva lateral al caminar en acera |
+| **EA-IPM** — vista cenital para aceras con pitch/roll | [KoreaScience](https://koreascience.kr/article/JAKO202315343225622.page) | Proyección IPM de la ROI inferior para medir offset lateral |
+| **PathFinder** — free path en profundidad monocular (arXiv 2025) | [arXiv:2504.20976](https://arxiv.org/html/2504.20976) | Corredor transitable y evitación frontal |
+
+### Sonificación y accesibilidad
+
+| Referencia | Enlace | Aplicación en Lazaro |
+|------------|--------|----------------------|
+| **WatchOut** — mapeos azimut→pan, distancia→pitch (ACM TAC 2021) | [doi:10.1145/3441852.3471203](https://doi.org/10.1145/3441852.3471203) | Pitidos estéreo L/R + frecuencia según proximidad frontal |
+| **Kalimeri et al.** — sonificación de obstáculos para peatones ciegos | [ACM TAC 2021](https://doi.org/10.1145/3441852.3471203) | Zona segura = silencio; deadband estrecho en recta |
+
+### Puertas, pasillos y bifurcaciones
+
+| Referencia | Enlace | Aplicación en Lazaro |
+|------------|--------|----------------------|
+| **Detección de puertas con visión monocular indoor** (IEEE 2021) | [doi:10.1109/ieeeconf49454.2021.9382783](https://doi.org/10.1109/ieeeconf49454.2021.9382783) | Vanishing point + jambas verticales |
+| **Hipótesis geométrica de marcos de puerta** (Unizar, arXiv 2024) | [arXiv:2401.17056](https://arxiv.org/abs/2401.17056) | Fase 2: puertas con profundidad |
+
+### Profundidad en móvil (Pixel 9 / ARCore)
+
+| Referencia | Enlace | Aplicación en Lazaro |
+|------------|--------|----------------------|
+| **ARCore Raw Depth API** (Google) | [Documentación](https://developers.google.com/ar/develop/java/depth/raw-depth) | Mapa de profundidad en Pixel 9 (fase 2) |
+| **CameraX + Camera2Interop** — metadatos de autofocus | [Stack Overflow / CameraX](https://stackoverflow.com/questions/74641691/android-camerax-how-to-get-af-status-associated-with-an-analysis-imageproxy) | LDAF: `LENS_FOCUS_DISTANCE` vía capture callback |
+
+### Control y robótica peatonal (conceptos)
+
+- **Pure pursuit / Stanley controller** — convertir error lateral en intensidad de pitido proporcional (no binaria).
+- **Segmentación walkable** — acera vs calzada (heurística depth + umbral; ML ONNX opcional en fase 5).
+
+> Si conoces más estudios sobre navegación peatón para personas ciegas con sonificación espacial, [abre un issue](https://github.com/datak0w/Lazaro/issues) o envía un PR ampliando esta sección.
 
 ---
 

@@ -28,10 +28,16 @@ class RouteIntentDetector @Inject constructor() {
         }
     }
 
+    fun isReRecord(userText: String): Boolean {
+        val text = normalize(userText)
+        return RE_RECORD_TRIGGERS.any { text.contains(it) }
+    }
+
     fun extractRouteName(userText: String): String? {
         val text = normalize(userText)
         val patterns = listOf(
-            Regex("""graba(?:r)?\s+ruta\s+(?:a|hacia|de)\s+(.+)"""),
+            Regex("""(?:regraba|afina|vuelve a grabar)\s+(?:la\s+)?ruta\s+(?:a|hacia|de)\s+(.+)"""),
+            Regex("""graba(?:r)?\s+(?:otra\s+vez\s+)?ruta\s+(?:a|hacia|de)\s+(.+)"""),
             Regex("""ruta\s+(?:a|de)\s+(.+)"""),
             Regex("""detalles?\s+(?:de\s+)?(?:la\s+)?ruta\s+(?:a|de)\s+(.+)"""),
             Regex("""borra(?:r)?\s+(?:la\s+)?ruta\s+(?:a|de)\s+(.+)"""),
@@ -71,6 +77,13 @@ class RouteIntentDetector @Inject constructor() {
         private val START_TRIGGERS = listOf(
             "graba ruta", "grabar ruta", "empieza a grabar", "inicia grabacion",
             "inicia grabación", "grabando ruta", "nueva ruta",
+            "regraba", "regrabar", "vuelve a grabar", "afina la ruta", "afinar ruta",
+            "graba otra vez",
+        )
+
+        private val RE_RECORD_TRIGGERS = listOf(
+            "regraba", "regrabar", "vuelve a grabar", "afina", "afinar",
+            "otra vez la ruta", "graba otra vez",
         )
 
         private val STOP_TRIGGERS = listOf(

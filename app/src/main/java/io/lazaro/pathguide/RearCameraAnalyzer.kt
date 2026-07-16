@@ -2,11 +2,16 @@ package io.lazaro.pathguide
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.TotalCaptureResult
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.util.Log
 import android.view.Display
 import android.view.Surface
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -76,11 +81,12 @@ class RearCameraAnalyzer @Inject constructor(
             cameraProvider = provider
             lifecycleOwner.start()
 
-            val analysis = ImageAnalysis.Builder()
+            val analysisBuilder = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .setTargetRotation(currentDisplayRotation())
-                .build()
+            attachFocusDistanceCallback(analysisBuilder)
+            val analysis = analysisBuilder.build()
             imageAnalysis = analysis
 
             analysis.setAnalyzer(executor) { image ->
@@ -105,6 +111,7 @@ class RearCameraAnalyzer @Inject constructor(
 
     fun stop() {
         running = false
+        FocusDistanceProbe.reset()
         unregisterDisplayListener()
         try {
             cameraProvider?.unbindAll()
@@ -178,6 +185,21 @@ class RearCameraAnalyzer @Inject constructor(
             } catch (_: Exception) {
             }
         }
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun attachFocusDistanceCallback(builder: ImageAnalysis.Builder) {
+        Camera2Interop.Extender(builder).setSessionCaptureCallback(
+            object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(
+                    session: CameraCaptureSession,
+                    request: CaptureRequest,
+                    result: TotalCaptureResult,
+                ) {
+                    FocusDistanceProbe.onCaptureCompleted(result)
+                }
+            },
+        )
     }
 
     private suspend fun obtainCameraProvider(): ProcessCameraProvider {

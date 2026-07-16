@@ -11,8 +11,10 @@ import io.lazaro.navigation.NavigationGuidanceMonitor
 import io.lazaro.navigation.NavigationSessionManager
 import io.lazaro.pathguide.PathGuideController
 import io.lazaro.pathguide.PathGuideMode
+import io.lazaro.routes.recording.RouteRecorderController
 import io.lazaro.voice.ListeningProfile
 import io.lazaro.voice.SamsungVoiceCompat
+import io.lazaro.voice.SoftWaitToneEngine
 import io.lazaro.voice.SpeechRecognitionManager
 import io.lazaro.voice.TextToSpeechManager
 import io.lazaro.voice.VoiceState
@@ -64,6 +66,8 @@ class AssistantController @Inject constructor(
     private val pathGuideController: PathGuideController,
     private val wakeWordController: WakeWordController,
     private val wakeWordNotifier: WakeWordNotifier,
+    private val softWaitToneEngine: SoftWaitToneEngine,
+    private val routeRecorderController: RouteRecorderController,
 ) {
     private val _uiState = MutableStateFlow(
         AssistantUiState(hasApiKey = geminiOrchestrator.hasApiKey()),
@@ -83,6 +87,7 @@ class AssistantController @Inject constructor(
     private var listeningSuspended = false
     private var voiceCaptureInProgress = false
     private var lastStateChangeMs = System.currentTimeMillis()
+    private var lastWakeHandledMs = 0L
 
     fun bind(scope: CoroutineScope) {
         this.scope = scope
@@ -131,10 +136,20 @@ class AssistantController @Inject constructor(
         listeningSuspended = false
         navigationPauseJob?.cancel()
         conversationWindowJob?.cancel()
+        softWaitToneEngine.stop()
         forceStopOutput()
         wakeWordController.stop()
+        wakeWordNotifier.clearListeningNotification()
         navigationGuidanceMonitor.stopNavigation()
-        pathGuideController.stop()
+        scope?.launch {
+            try {
+                if (routeRecorderController.isCapturingSamples()) {
+                    routeRecorderController.finishPassiveLearn()
+                }
+            } catch (_: Exception) {
+            }
+            pathGuideController.stop()
+        }
         resetCounters()
         stopWatchdog()
         speechRecognitionManager.shutdown()
@@ -201,19 +216,23 @@ class AssistantController @Inject constructor(
             if (!isActive || listeningSuspended) return@launch
             if (isSpeaking) delay(SamsungVoiceCompat.postSpeechDelayMs)
             if (!isActive || listeningSuspended) return@launch
+            // Parar Google STT; standby = solo Vosk (sin pitidos de conexión)
             speechRecognitionManager.stopListening()
+            voiceCaptureInProgress = false
             markState(
                 voiceState = VoiceState.Idle,
                 statusMessage = standbyStatusMessage(),
                 awaitingTrigger = true,
                 partialTranscript = "",
             )
+            releaseWakeWordAfterCommand()
         }
     }
 
     private fun forceStopOutput() {
         isSpeaking = false
         voiceCaptureInProgress = false
+        softWaitToneEngine.stop()
         cancelScheduledListen()
         processingJob?.cancel()
         processingJob = null
@@ -231,26 +250,60 @@ class AssistantController @Inject constructor(
             ?: "Listo. Di Lazaro, toca la pantalla o pulsa el botón del bastón."
     }
 
+    /**
+     * Vosk detectó «Lázaro» → pausar Vosk, esperar mic, abrir Google STT para el comando.
+     */
     private fun onWakeWordDetected() {
-        if (!isActive || isSpeaking) return
-        if (voiceCaptureInProgress && !navigationSessionManager.isNavigationActive()) return
-        wakeWordNotifier.playActivationSound()
-        wakeWordController.pauseForCommand()
+        if (!isActive) return
+        val now = System.currentTimeMillis()
+        if (now - lastWakeHandledMs < WAKE_DEBOUNCE_MS) return
+        lastWakeHandledMs = now
+
+        if (voiceCaptureInProgress &&
+            speechRecognitionManager.isActive() &&
+            !isSpeaking &&
+            processingJob?.isActive != true
+        ) {
+            wakeWordNotifier.playActivationSound()
+            return
+        }
+
         listeningSuspended = false
         navigationPauseJob?.cancel()
+        softWaitToneEngine.stop()
+        cancelScheduledListen()
         processingJob?.cancel()
         processingJob = null
-        forceStopOutput()
+        isSpeaking = false
+        textToSpeechManager.stop()
+        bookReaderAction.stopPlayback()
+        speechRecognitionManager.stopListening()
+
+        wakeWordNotifier.playActivationSound()
+        wakeWordController.pauseForCommand() // para Vosk ya
         resetCounters()
         listenProfile = ListeningProfile.DIRECT_RESPONSE
-        markState(VoiceState.Listening, "Te escucho.", awaitingTrigger = false)
-        startDirectListening(force = true, skipPause = true)
+        voiceCaptureInProgress = true
+        markState(
+            voiceState = VoiceState.Listening,
+            statusMessage = "Te escucho.",
+            awaitingTrigger = false,
+            partialTranscript = "",
+        )
+
+        // Dar tiempo a liberar AudioRecord de Vosk antes de Google (Samsung)
+        scope?.launch {
+            delay(MIC_HANDOFF_DELAY_MS)
+            if (!isActive || listeningSuspended || isSpeaking) return@launch
+            startDirectListening(force = true, skipPause = true)
+        }
     }
 
     private fun startDirectListening(force: Boolean = false, skipPause: Boolean = false) {
         if (!isActive || isSpeaking || listeningSuspended) return
         if (!force && speechRecognitionManager.isActive()) return
 
+        softWaitToneEngine.stop()
         if (!skipPause) {
             wakeWordController.pauseForCommand()
         }
@@ -276,6 +329,10 @@ class AssistantController @Inject constructor(
                 scope?.launch { handleSpeechError(message, isSilent) }
             },
         )
+    }
+
+    private fun releaseWakeWordAfterCommand() {
+        wakeWordController.releaseAfterCommand()
     }
 
     private fun resolveCommandText(text: String, wakeMatch: WakeWordMatch? = null): String {
@@ -330,7 +387,6 @@ class AssistantController @Inject constructor(
 
         val text = rawText.trim()
         if (text.isBlank()) {
-            releaseWakeWordAfterCommand()
             returnToStandby(delayMs = 0L)
             return
         }
@@ -344,13 +400,16 @@ class AssistantController @Inject constructor(
 
         val wakeMatch = WakeWordDetector.parse(text)
         if (wakeMatch.detected && wakeMatch.command.isBlank()) {
-            speakOnly("Te escucho.")
             listenProfile = ListeningProfile.DIRECT_RESPONSE
-            startDirectListening(force = true)
+            startDirectListening(force = true, skipPause = true)
             return
         }
 
         val command = resolveCommandText(text, wakeMatch)
+        if (command.isBlank()) {
+            startDirectListening(force = true, skipPause = true)
+            return
+        }
         dispatchCommand(command)
     }
 
@@ -387,13 +446,15 @@ class AssistantController @Inject constructor(
                 voiceCaptureInProgress = false
                 when (val result = stopActiveSessionHandler.handleStop(rawText)) {
                     is StopSessionResult.Handled -> {
+                        softWaitToneEngine.stop()
                         markState(
                             voiceState = VoiceState.Idle,
                             statusMessage = standbyStatusMessage(),
                             awaitingTrigger = true,
                             partialTranscript = "",
                         )
-                        wakeWordController.ensurePassiveListening()
+                        wakeWordNotifier.clearListeningNotification()
+                        restoreWakeWordPassive()
                         returnToStandby(delayMs = 0L)
                     }
                     StopSessionResult.NotHandled -> resumeListening(directAfter = false)
@@ -418,22 +479,23 @@ class AssistantController @Inject constructor(
         voiceCaptureInProgress = false
         if (isSpeaking || processingJob?.isActive == true) return
 
+        // Como el modo Vosk estable: errores silenciosos no hablan «No te he oído»
         if (isSilent) {
             when {
                 actionExecutor.hasPendingConfirmation() -> resumePendingInput()
-                resolveListenProfile() == ListeningProfile.DIRECT_RESPONSE -> {
-                    silentRetries = 0
-                    listenProfile = ListeningProfile.STANDBY
-                    releaseWakeWordAfterCommand()
-                    scheduleListen(delayMs = SamsungVoiceCompat.returnToPassiveDelayMs)
+                listenProfile == ListeningProfile.DIRECT_RESPONSE && silentRetries < 1 -> {
+                    silentRetries++
+                    startDirectListening(force = true, skipPause = true)
                 }
                 else -> {
-                    releaseWakeWordAfterCommand()
+                    silentRetries = 0
+                    listenProfile = ListeningProfile.STANDBY
                     returnToStandby(delayMs = 0L)
                 }
             }
             return
         }
+
         if (message.isNotBlank()) {
             speakOnly(message)
         }
@@ -448,6 +510,7 @@ class AssistantController @Inject constructor(
                 awaitingTrigger = false,
                 partialTranscript = text,
             )
+            wakeWordNotifier.clearListeningNotification()
 
             val reply = geminiOrchestrator.handleUserMessage(text)
             resetCounters()
@@ -474,11 +537,23 @@ class AssistantController @Inject constructor(
 
             if (reply.suspendListening) {
                 conversationWindowJob?.cancel()
-                val mapsLaunched = actionExecutor.runDeferredMapsLaunch()
-                if (mapsLaunched) {
-                    navigationSessionManager.startSession()
+                // Si hay launch diferido, ejecutarlo tras el TTS; si no, la acción ya abrió la app.
+                val mapsOk = if (actionExecutor.hasDeferredMapsLaunch()) {
+                    actionExecutor.runDeferredMapsLaunch()
+                } else {
+                    true
+                }
+                val navAlready =
+                    navigationSessionManager.isNavigationActive() ||
+                        pathGuideController.currentMode() == PathGuideMode.NAVEGACION ||
+                        pathGuideController.currentMode() == PathGuideMode.RUTA
+                if (mapsOk || navAlready) {
+                    if (!navigationSessionManager.isNavigationActive()) {
+                        navigationSessionManager.startSession()
+                    }
                     scope?.launch {
-                        if (pathGuideController.currentMode() != PathGuideMode.RUTA) {
+                        val mode = pathGuideController.currentMode()
+                        if (mode != PathGuideMode.RUTA && mode != PathGuideMode.NAVEGACION) {
                             pathGuideController.start(PathGuideMode.NAVEGACION)
                         }
                     }
@@ -499,7 +574,7 @@ class AssistantController @Inject constructor(
                 scheduleListen(delayMs = SamsungVoiceCompat.postSpeechDelayMs)
             } else {
                 conversationWindowJob?.cancel()
-                releaseWakeWordAfterCommand()
+                restoreWakeWordPassive()
                 returnToStandby()
             }
 
@@ -507,15 +582,19 @@ class AssistantController @Inject constructor(
                 scope?.launch { backgroundMaybeLearn(text, reply.spokenText) }
             }
         } catch (e: CancellationException) {
+            softWaitToneEngine.stop()
             // Interrupción: handleInterruptCommand o interruptAndListen retoman.
         } catch (e: Exception) {
+            softWaitToneEngine.stop()
             speakOnly("Algo falló. Sigo aquí.")
             if (actionExecutor.hasPendingConfirmation()) {
                 resumePendingInput()
             } else {
+                restoreWakeWordPassive()
                 returnToStandby()
             }
         } finally {
+            softWaitToneEngine.stop()
             processingJob = null
         }
     }
@@ -557,6 +636,7 @@ class AssistantController @Inject constructor(
             delay(CONVERSATION_WINDOW_MS)
             if (!isActive || isSpeaking || actionExecutor.hasPendingConfirmation()) return@launch
             listenProfile = ListeningProfile.STANDBY
+            restoreWakeWordPassive()
             returnToStandby(delayMs = 0L)
         }
     }
@@ -564,6 +644,7 @@ class AssistantController @Inject constructor(
     private suspend fun speakOnly(message: String) {
         if (!isActive) return
 
+        softWaitToneEngine.stop()
         cancelScheduledListen()
         speechRecognitionManager.stopListening()
         voiceCaptureInProgress = false
@@ -581,14 +662,11 @@ class AssistantController @Inject constructor(
     }
 
     private fun enterNavigationPause() {
+        softWaitToneEngine.stop()
         cancelScheduledListen()
         speechRecognitionManager.stopListening()
         voiceCaptureInProgress = false
-        wakeWordController.releaseAfterCommand()
-        scope?.launch {
-            delay(600L)
-            wakeWordController.ensurePassiveListening()
-        }
+        restoreWakeWordPassive()
         resetCounters()
         listenProfile = ListeningProfile.STANDBY
         markState(
@@ -620,6 +698,14 @@ class AssistantController @Inject constructor(
         partialTranscript: String = _uiState.value.partialTranscript,
     ) {
         lastStateChangeMs = System.currentTimeMillis()
+        when (voiceState) {
+            VoiceState.Processing -> softWaitToneEngine.startDelayed()
+            VoiceState.Speaking,
+            VoiceState.Listening,
+            VoiceState.Idle,
+            VoiceState.Error,
+            -> softWaitToneEngine.stop()
+        }
         _uiState.update {
             it.copy(
                 voiceState = voiceState,
@@ -651,16 +737,20 @@ class AssistantController @Inject constructor(
         watchdogJob = null
     }
 
-    private fun releaseWakeWordAfterCommand() {
-        wakeWordController.releaseAfterCommand()
+    /** Fuerza wake pasivo Google (prioridad máxima tras operaciones / standby). */
+    private fun restoreWakeWordPassive() {
+        wakeWordController.ensurePassiveListening()
     }
 
     private fun recoverIfStuck() {
         val state = _uiState.value.voiceState
         val elapsed = System.currentTimeMillis() - lastStateChangeMs
+        val wakeStatus = _uiState.value.wakeWordStatus
+        val awaiting = _uiState.value.awaitingTrigger
 
         when {
             state == VoiceState.Processing && processingJob?.isActive != true && elapsed > STUCK_PROCESSING_MS -> {
+                softWaitToneEngine.stop()
                 processingJob = null
                 isSpeaking = false
                 markState(VoiceState.Idle, "Recuperado.", awaitingTrigger = !actionExecutor.hasPendingConfirmation())
@@ -677,34 +767,53 @@ class AssistantController @Inject constructor(
                 !isSpeaking &&
                 !listeningSuspended &&
                 elapsed > 2_500L -> {
-                startDirectListening(force = true)
+                startDirectListening(force = true, skipPause = true)
             }
+            state == VoiceState.Listening && voiceCaptureInProgress -> Unit
             state == VoiceState.Listening &&
                 !speechRecognitionManager.isActive() &&
                 resumeListeningJob?.isActive != true &&
                 processingJob?.isActive != true &&
                 !isSpeaking &&
                 !listeningSuspended &&
+                !voiceCaptureInProgress &&
                 elapsed > STUCK_LISTENING_MS -> {
                 resumeListening(directAfter = actionExecutor.hasPendingConfirmation())
             }
-            navigationSessionManager.isNavigationActive() &&
-                _uiState.value.wakeWordStatus != WakeWordStatus.ACTIVE &&
-                _uiState.value.wakeWordStatus != WakeWordStatus.STARTING &&
-                _uiState.value.wakeWordStatus != WakeWordStatus.PAUSED &&
+            // Vosk caído en standby
+            awaiting &&
+                state == VoiceState.Idle &&
                 !isSpeaking &&
-                !voiceCaptureInProgress -> {
+                !voiceCaptureInProgress &&
+                processingJob?.isActive != true &&
+                (wakeStatus == WakeWordStatus.PAUSED ||
+                    wakeStatus == WakeWordStatus.ERROR ||
+                    wakeStatus == WakeWordStatus.OFF) &&
+                elapsed > STUCK_WAKE_MS -> {
+                wakeWordController.ensurePassiveListening()
+            }
+            navigationSessionManager.isNavigationActive() &&
+                awaiting &&
+                state == VoiceState.Idle &&
+                wakeStatus != WakeWordStatus.ACTIVE &&
+                wakeStatus != WakeWordStatus.STARTING &&
+                !isSpeaking &&
+                !voiceCaptureInProgress &&
+                processingJob?.isActive != true -> {
                 wakeWordController.ensurePassiveListening()
             }
         }
     }
 
     companion object {
-        private const val WATCHDOG_INTERVAL_MS = 8_000L
+        private const val WATCHDOG_INTERVAL_MS = 5_000L
         private const val STUCK_PROCESSING_MS = 25_000L
         private const val STUCK_SPEAKING_MS = 12_000L
         private const val STUCK_LISTENING_MS = 22_000L
+        private const val STUCK_WAKE_MS = 4_000L
         private const val CONVERSATION_WINDOW_MS = 50_000L
         private const val NAVIGATION_PAUSE_MS = 45 * 60 * 1000L
+        private const val WAKE_DEBOUNCE_MS = 2_000L
+        private const val MIC_HANDOFF_DELAY_MS = 550L
     }
 }

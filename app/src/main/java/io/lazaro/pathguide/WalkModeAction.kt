@@ -22,8 +22,8 @@ class WalkModeAction @Inject constructor(
         val started = pathGuideController.start(PathGuideMode.PASEO)
         return if (started) {
             ActionResult.Success(
-                "Modo paseo activo. Te guiaré con sonidos por la cámara. " +
-                    "Di Lázaro, terminar paseo, para parar.",
+                "Modo paseo activo. Te guío con pitidos por la cámara. " +
+            "Di Lázaro, terminar paseo, para parar.",
             )
         } else {
             ActionResult.Error(

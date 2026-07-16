@@ -50,18 +50,20 @@ class MicrophoneArbitrator @Inject constructor() {
     fun acquireCommandCapture() {
         resumeJob?.cancel()
         resumeJob = null
-        val wasPassive = commandDepth == 0
-        commandDepth++
-        if (wasPassive) {
+        // Idempotente: un solo nivel de “sesión de comando” evita depth stuck
+        // (pause + startDirectListening sin skipPause dejaba depth=2 y wake PAUSED).
+        if (commandDepth > 0) {
             mode = MicrophoneMode.COMMAND_CAPTURE
-            onPausePassive?.invoke()
+            return
         }
+        commandDepth = 1
+        mode = MicrophoneMode.COMMAND_CAPTURE
+        onPausePassive?.invoke()
     }
 
     fun releaseCommandCapture() {
-        commandDepth = (commandDepth - 1).coerceAtLeast(0)
-        if (commandDepth > 0) return
-
+        if (commandDepth == 0 && mode == MicrophoneMode.PASSIVE_WAKE_WORD) return
+        commandDepth = 0
         mode = MicrophoneMode.PASSIVE_WAKE_WORD
         resumeJob?.cancel()
         resumeJob = scope?.launch {

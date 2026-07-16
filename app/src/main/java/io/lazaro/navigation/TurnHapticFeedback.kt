@@ -6,20 +6,67 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 
+/**
+ * Háptica pensada para persona ciega: patrones cortos, claros y distintivos.
+ * Sin depender de mirar la pantalla.
+ */
 object TurnHapticFeedback {
 
     fun pulseForInstruction(context: Context, instruction: String) {
         if (!MapsNavigationParser.isTurnInstruction(instruction)) return
         val side = MapsNavigationParser.turnSide(instruction) ?: return
-        pulse(context, side)
+        pulseTurn(context, side)
     }
 
-    fun pulse(context: Context, side: TurnSide) {
+    /** Giro Maps / IMU: izquierda=2 pulsos, derecha=1 largo, retorno=3. */
+    fun pulseTurn(context: Context, side: TurnSide) {
         val vibrator = vibrator(context) ?: return
         val effect = when (side) {
-            TurnSide.LEFT -> waveformEffect(longArrayOf(0, 70, 60, 70), intArrayOf(0, 160, 0, 160))
-            TurnSide.RIGHT -> waveformEffect(longArrayOf(0, 110), intArrayOf(0, 200))
-            TurnSide.U_TURN -> waveformEffect(longArrayOf(0, 90, 50, 90, 50, 90), intArrayOf(0, 180, 0, 180, 0, 180))
+            TurnSide.LEFT -> waveform(
+                longArrayOf(0, 90, 70, 90),
+                intArrayOf(0, 220, 0, 220),
+            )
+            TurnSide.RIGHT -> waveform(
+                longArrayOf(0, 160),
+                intArrayOf(0, 250),
+            )
+            TurnSide.U_TURN -> waveform(
+                longArrayOf(0, 100, 55, 100, 55, 100),
+                intArrayOf(0, 230, 0, 230, 0, 230),
+            )
+        }
+        vibrator.vibrate(effect)
+    }
+
+    /** Al alcanzar el ángulo correcto (éxito). */
+    fun pulseAligned(context: Context) {
+        val vibrator = vibrator(context) ?: return
+        vibrator.vibrate(
+            waveform(
+                longArrayOf(0, 45, 35, 90),
+                intArrayOf(0, 180, 0, 255),
+            ),
+        )
+    }
+
+    /** Obstáculo delante: alerta fuerte y breve. */
+    fun pulseObstacle(context: Context) {
+        val vibrator = vibrator(context) ?: return
+        vibrator.vibrate(
+            waveform(
+                longArrayOf(0, 120, 40, 120),
+                intArrayOf(0, 255, 0, 255),
+            ),
+        )
+    }
+
+    /** Micro-pulso al lado hacia el que guiar (refuerzo de pitido). */
+    fun pulseGuideNudge(context: Context, turnLeft: Boolean) {
+        val vibrator = vibrator(context) ?: return
+        val effect = if (turnLeft) {
+            waveform(longArrayOf(0, 50, 40, 50), intArrayOf(0, 160, 0, 160))
+        } else {
+            waveform(longArrayOf(0, 85), intArrayOf(0, 190))
         }
         vibrator.vibrate(effect)
     }
@@ -34,7 +81,7 @@ object TurnHapticFeedback {
         }
     }
 
-    private fun waveformEffect(timings: LongArray, amplitudes: IntArray): VibrationEffect {
+    private fun waveform(timings: LongArray, amplitudes: IntArray): VibrationEffect {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             VibrationEffect.createWaveform(timings, amplitudes, -1)
         } else {

@@ -16,6 +16,7 @@ datastore = "1.1.1"
 vosk = "0.3.47"
 jna = "5.13.0"
 camerax = "1.4.1"
+arcore = "1.44.0"
 mlkitLabeling = "17.0.9"
 mlkitTextRecognition = "16.0.1"
 
@@ -48,6 +49,7 @@ jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
 androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+google-ar-core = { group = "com.google.ar", name = "core", version.ref = "arcore" }
 mlkit-image-labeling = { group = "com.google.mlkit", name = "image-labeling", version.ref = "mlkitLabeling" }
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
 

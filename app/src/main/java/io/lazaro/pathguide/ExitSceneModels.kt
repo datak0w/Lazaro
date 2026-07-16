@@ -100,6 +100,19 @@ data class ExitBrainFrameResult(
     val roadSide: RoadSide = RoadSide.UNKNOWN,
     val safeSide: RoadSide = RoadSide.UNKNOWN,
     val sidewalkAlignment: SidewalkAlignment = SidewalkAlignment.UNKNOWN,
+    val driftScore: Float = 0f,
+    val centeringScore: Float = 0.5f,
+    val inSafeZone: Boolean = false,
+    val sidewalkLeftNorm: Float = 0.22f,
+    val sidewalkRightNorm: Float = 0.78f,
     val mapsInstructionType: MapsInstructionType = MapsInstructionType.OTHER,
     val warningMode: Boolean = false,
+    /** Tono continuo suave para corrección lateral en recta. */
+    val guidanceMode: Boolean = false,
+    /** Ángulo IMU acabado de alinear: coin + háptica. */
+    val justAligned: Boolean = false,
+    val lateralOffsetNorm: Float = 0f,
+    val walkableConfidence: Float = 0f,
+    val perceptionSource: PerceptionSource = PerceptionSource.MONOCULAR,
+    val frontalDistanceM: Float? = null,
 )

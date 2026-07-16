@@ -69,6 +69,11 @@ class RouteRepository @Inject constructor(
         )
     }
 
+    suspend fun abandonRun(runId: Long) {
+        routeDao.deleteObservationsForRun(runId)
+        routeDao.deleteRun(runId)
+    }
+
     suspend fun appendObservations(observations: List<RouteObservation>) {
         if (observations.isNotEmpty()) {
             routeDao.insertObservations(observations)

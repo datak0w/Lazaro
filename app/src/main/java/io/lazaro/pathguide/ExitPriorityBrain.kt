@@ -128,7 +128,7 @@ class ExitPriorityBrain @Inject constructor(
 
         val approachCue = if (phase == ExitBrainPhase.BLOCKED && approach.announceReady) {
             exitGuideAnnouncer.buildApproachCue(
-                label = obstacleLabel ?: "obstáculo",
+                label = "obstáculo",
                 approach = approach,
                 corridor = corridor,
             )
@@ -166,7 +166,9 @@ class ExitPriorityBrain @Inject constructor(
             doorwayMode = beeps.doorwayMode,
             continuousTone = beeps.continuousTone,
             voiceCue = voiceCue,
-            isExitGuiding = doorwayGuide.isGuiding || phase in GUIDING_PHASES,
+            isExitGuiding = doorwayGuide.isGuiding || phase in GUIDING_PHASES ||
+                (alignment != null && !alignment.aligned &&
+                    (alignment.guideLeftBeep > 0.1f || alignment.guideRightBeep > 0.1f)),
             junctionType = junction,
             approachState = approach,
             shouldAnnounceFrontal = shouldAnnounceFrontal,
@@ -174,8 +176,9 @@ class ExitPriorityBrain @Inject constructor(
             doorwayPhase = doorwayGuide.phase,
             turnRemainingDeg = alignment?.remainingDeg,
             turnTurnedDeg = alignment?.turnedDeg,
-            suppressScene = phase in GUIDING_PHASES || doorwayGuide.isGuiding,
+            suppressScene = true,
             exitTarget = resolvedTarget,
+            justAligned = alignment?.justAligned == true,
         )
     }
 
@@ -292,6 +295,18 @@ class ExitPriorityBrain @Inject constructor(
         mode: PathGuideMode,
         config: PathGuideConfig,
     ): BeepOutput {
+        // Prioridad 1: guía IMU — pitido en el lado hacia el que girar.
+        if (alignment != null && !alignment.aligned &&
+            (alignment.guideLeftBeep > 0.05f || alignment.guideRightBeep > 0.05f)
+        ) {
+            return BeepOutput(
+                left = alignment.guideLeftBeep,
+                right = alignment.guideRightBeep,
+                doorwayMode = true,
+                continuousTone = alignment.continuousGuide,
+            )
+        }
+
         if (doorwayGuide.isGuiding && config.doorwayAlertsEnabled) {
             val continuous = doorwayGuide.continuousTone && alignment?.aligned != true
             return BeepOutput(
@@ -302,14 +317,14 @@ class ExitPriorityBrain @Inject constructor(
             )
         }
 
-        val (left, right) = applyNavigationTurnBias(
-            corridor.leftProximity,
-            corridor.rightProximity,
-            mode,
-        )
+        var left = corridor.leftProximity
+        var right = corridor.rightProximity
+        val biased = applyNavigationTurnBias(left, right, mode)
+        left = biased.first
+        right = biased.second
 
         if (alignment?.aligned == true) {
-            return BeepOutput(left * 0.5f, right * 0.5f, doorwayMode = corridor.doorwayActive)
+            return BeepOutput(left * 0.35f, right * 0.35f, doorwayMode = corridor.doorwayActive)
         }
 
         return BeepOutput(left, right, doorwayMode = corridor.doorwayActive)

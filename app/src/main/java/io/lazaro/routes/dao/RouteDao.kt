@@ -48,6 +48,9 @@ interface RouteDao {
     @Query("SELECT * FROM route_observations WHERE runId = :runId ORDER BY seq ASC")
     suspend fun getObservationsForRun(runId: Long): List<RouteObservation>
 
+    @Query("DELETE FROM route_runs WHERE id = :id")
+    suspend fun deleteRun(id: Long)
+
     @Query("DELETE FROM route_observations WHERE runId = :runId")
     suspend fun deleteObservationsForRun(runId: Long)
 

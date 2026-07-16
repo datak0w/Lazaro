@@ -108,7 +108,7 @@ class CorridorScorer {
         val occupancyScore = (occupied.toFloat() / total).coerceIn(0f, 1f)
         val lowerScore = if (lowerCount > 0f) (lowerWeight / lowerCount).coerceIn(0f, 1f) else 0f
 
-        return (edgeScore * 0.45f + occupancyScore * 0.35f + lowerScore * 0.20f).coerceIn(0f, 1f)
+        return (edgeScore * 0.38f + occupancyScore * 0.32f + lowerScore * 0.30f).coerceIn(0f, 1f)
     }
 
     private fun bandMedian(

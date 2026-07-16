@@ -15,6 +15,7 @@ class NavigationSessionManager @Inject constructor(
     private val wakeWordController: WakeWordController,
     private val mapsSessionCloser: MapsSessionCloser,
     private val mapsVisionFusionCoordinator: MapsVisionFusionCoordinator,
+    private val hybridNavigationCoordinator: io.lazaro.routes.HybridNavigationCoordinator,
 ) {
     fun isNavigationActive(): Boolean {
         return navigationGuidanceMonitor.isNavigationActive() ||
@@ -30,12 +31,20 @@ class NavigationSessionManager @Inject constructor(
     suspend fun endSession(speakConfirmation: Boolean = true) {
         navigationGuidanceMonitor.stopNavigation()
         textToSpeechManager.stop()
-        pathGuideController.stop()
+        val learnMsg = if (pathGuideController.currentMode() == PathGuideMode.RUTA) {
+            hybridNavigationCoordinator.stop()
+        } else {
+            pathGuideController.stop()
+            null
+        }
         mapsVisionFusionCoordinator.reset()
         mapsSessionCloser.closeMapsNavigation()
         mapsSessionCloser.bringLazaroToFront()
         if (speakConfirmation) {
-            textToSpeechManager.speak("Navegación terminada.")
+            val base = "Navegación terminada."
+            textToSpeechManager.speak(if (learnMsg != null) "$base $learnMsg" else base)
+        } else if (learnMsg != null) {
+            textToSpeechManager.speak(learnMsg)
         }
         wakeWordController.ensurePassiveListening()
     }

@@ -34,6 +34,7 @@ class HybridNavigationCoordinator @Inject constructor(
     private val locationAction: LocationAction,
     private val mapsLaunchDeferrer: MapsLaunchDeferrer,
     private val navigationAudioCoordinator: NavigationAudioCoordinator,
+    private val routeRecorderController: io.lazaro.routes.recording.RouteRecorderController,
 ) {
     private val _state = MutableStateFlow(HybridNavState())
     val state: StateFlow<HybridNavState> = _state.asStateFlow()
@@ -42,6 +43,8 @@ class HybridNavigationCoordinator @Inject constructor(
         routeReplayBrain.loadRoute(route.id)
         val started = pathGuideController.start(PathGuideMode.RUTA, routeId = route.id)
         if (!started) return false
+
+        routeRecorderController.startPassiveLearn(route.id)
 
         val location = locationAction.getCurrentLocation()
         mapsLaunchDeferrer.defer {
@@ -60,11 +63,17 @@ class HybridNavigationCoordinator @Inject constructor(
         return true
     }
 
-    suspend fun stop() {
+    suspend fun stop(): String? {
+        val learnMsg = try {
+            routeRecorderController.finishPassiveLearn()
+        } catch (_: Exception) {
+            null
+        }
         routeReplayBrain.reset()
         pathGuideController.stop()
         navigationAudioCoordinator.setReplaySegmentActive(false)
         _state.value = HybridNavState()
+        return learnMsg
     }
 
     fun updateReplayMetrics(matchConfidence: Float, lateralOffsetM: Float, inReplay: Boolean) {

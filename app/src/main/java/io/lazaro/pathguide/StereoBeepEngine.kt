@@ -22,12 +22,13 @@ class StereoBeepEngine @Inject constructor(
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + Job())
     private var loopJob: Job? = null
-    private var volume = 0.75f
+    private var volume = 0.92f
     private var leftProximity = 0f
     private var rightProximity = 0f
     private var doorwayMode = false
     private var continuousMode = false
     private var warningMode = false
+    private var guidanceMode = false
     private var paused = false
     private var enabled = false
 
@@ -87,14 +88,20 @@ class StereoBeepEngine @Inject constructor(
         doorwayMode: Boolean = false,
         continuousTone: Boolean = false,
         warningMode: Boolean = false,
+        guidanceMode: Boolean = false,
     ) {
-        val (stableLeft, stableRight) = beepStabilizer.stabilize(left, right, doorwayMode)
-        leftProximity = stableLeft
-        rightProximity = stableRight
         this.doorwayMode = doorwayMode
         this.warningMode = warningMode
-        continuousMode = continuousTone || warningMode
-        if (!continuousMode) {
+        this.guidanceMode = guidanceMode
+        continuousMode = continuousTone || warningMode || guidanceMode
+        // Guía continua L/R (acera/giro): no matar la señal con dead-zone del estabilizador.
+        if (continuousMode) {
+            leftProximity = left.coerceIn(0f, 1f)
+            rightProximity = right.coerceIn(0f, 1f)
+        } else {
+            val (stableLeft, stableRight) = beepStabilizer.stabilize(left, right, doorwayMode)
+            leftProximity = stableLeft
+            rightProximity = stableRight
             stopContinuousTone()
             latchedContinuousSide = BeepSignalStabilizer.SIDE_NONE
         }
@@ -105,11 +112,89 @@ class StereoBeepEngine @Inject constructor(
         if (value) stopContinuousTone()
     }
 
+    /**
+     * Tono de éxito tipo "coin" (Super Mario): dos notas ascendentes rápidas en ambos oídos.
+     * Se dispara al alinear el ángulo IMU correcto.
+     */
+    fun playSuccessCoin() {
+        scope.launch(Dispatchers.IO) {
+            val wasPaused = paused
+            paused = true
+            stopContinuousTone()
+            try {
+                playCoinChirp()
+            } finally {
+                paused = wasPaused
+            }
+        }
+    }
+
+    private fun playCoinChirp() {
+        val sampleRate = SAMPLE_RATE
+        val notes = listOf(
+            988f to 70,   // B5
+            1319f to 140, // E6
+        )
+        val totalMs = notes.sumOf { it.second } + 20
+        val totalSamples = (sampleRate * totalMs / 1000.0).toInt()
+        val stereo = ShortArray(totalSamples * 2)
+        var offset = 0
+        val amp = (Short.MAX_VALUE * volume * 0.42f).toInt()
+
+        for ((freq, durMs) in notes) {
+            val n = (sampleRate * durMs / 1000.0).toInt()
+            for (i in 0 until n) {
+                if (offset + i >= totalSamples) break
+                val env = when {
+                    i < n * 0.08 -> i / (n * 0.08f)
+                    i > n * 0.7 -> ((n - i) / (n * 0.3f)).coerceIn(0f, 1f)
+                    else -> 1f
+                }
+                val sample = (sin(2.0 * PI * freq * i / sampleRate) * amp * env).toInt().toShort()
+                val idx = (offset + i) * 2
+                stereo[idx] = sample
+                stereo[idx + 1] = sample
+            }
+            offset += n
+        }
+
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                    .build(),
+            )
+            .setBufferSizeInBytes(stereo.size * 2)
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .build()
+
+        try {
+            track.write(stereo, 0, stereo.size)
+            track.play()
+            Thread.sleep(totalMs.toLong() + 15)
+        } catch (_: Exception) {
+        } finally {
+            try {
+                track.stop()
+                track.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     private var lastLeftBeepMs = 0L
     private var lastRightBeepMs = 0L
 
     private fun renderContinuousTone() {
-        val threshold = CONTINUOUS_THRESHOLD
+        val threshold = if (guidanceMode) GUIDANCE_THRESHOLD else CONTINUOUS_THRESHOLD
         val leftActive = leftProximity >= threshold
         val rightActive = rightProximity >= threshold
 
@@ -126,12 +211,10 @@ class StereoBeepEngine @Inject constructor(
                 BeepSignalStabilizer.SIDE_LEFT
             rightProximity > leftProximity + CONTINUOUS_SWITCH_MARGIN ->
                 BeepSignalStabilizer.SIDE_RIGHT
-            else -> latchedContinuousSide
-        }
-
-        if (targetSide == BeepSignalStabilizer.SIDE_NONE) {
-            stopContinuousTone()
-            return
+            // Ambos lados activos (p. ej. calzada sin lado seguro): mantener oír-preferido
+            latchedContinuousSide != BeepSignalStabilizer.SIDE_NONE -> latchedContinuousSide
+            leftProximity >= rightProximity -> BeepSignalStabilizer.SIDE_LEFT
+            else -> BeepSignalStabilizer.SIDE_RIGHT
         }
 
         val now = System.currentTimeMillis()
@@ -141,7 +224,7 @@ class StereoBeepEngine @Inject constructor(
                 continuousLatchSinceMs = now
             }
             targetSide != latchedContinuousSide &&
-                now - continuousLatchSinceMs >= CONTINUOUS_HOLD_MS -> {
+                now - continuousLatchSinceMs >= if (guidanceMode) GUIDANCE_HOLD_MS else CONTINUOUS_HOLD_MS -> {
                 latchedContinuousSide = targetSide
                 continuousLatchSinceMs = now
                 stopContinuousTone()
@@ -156,13 +239,17 @@ class StereoBeepEngine @Inject constructor(
         val proximity = if (channel == CHANNEL_LEFT) leftProximity else rightProximity
         val targetFrequency = if (warningMode) {
             lerp(WARNING_MIN_FREQ, WARNING_MAX_FREQ, proximity)
+        } else if (guidanceMode) {
+            lerp(GUIDANCE_MIN_FREQ, GUIDANCE_MAX_FREQ, proximity)
         } else {
             lerp(CONTINUOUS_MIN_FREQ, CONTINUOUS_MAX_FREQ, proximity)
         }
         val targetAmplitude = if (warningMode) {
-            lerp(0.20f, 0.38f, proximity) * volume
+            lerp(0.45f, 0.72f, proximity) * volume
+        } else if (guidanceMode) {
+            lerp(0.18f, 0.48f, proximity) * volume
         } else {
-            lerp(0.14f, 0.30f, proximity) * volume
+            lerp(0.38f, 0.62f, proximity) * volume
         }
 
         if (warningMode) {
@@ -254,7 +341,7 @@ class StereoBeepEngine @Inject constructor(
         continuousTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build(),
             )
@@ -313,7 +400,7 @@ class StereoBeepEngine @Inject constructor(
         val sampleRate = SAMPLE_RATE
         val samples = (sampleRate * durationMs / 1000.0).toInt()
         val stereo = ShortArray(samples * 2)
-        val amplitude = (Short.MAX_VALUE * volume * 0.35f).toInt()
+        val amplitude = (Short.MAX_VALUE * volume * 0.48f).toInt()
 
         for (i in 0 until samples) {
             val sample = (sin(2.0 * PI * frequency * i / sampleRate) * amplitude).toInt().toShort()
@@ -330,7 +417,7 @@ class StereoBeepEngine @Inject constructor(
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build(),
             )
@@ -373,14 +460,18 @@ class StereoBeepEngine @Inject constructor(
         private const val CHANNEL_LEFT = 0
         private const val CHANNEL_RIGHT = 1
         private const val CHANNEL_NONE = -1
-        private const val BEEP_THRESHOLD = 0.22f
-        private const val DOORWAY_BEEP_THRESHOLD = 0.30f
-        private const val CONTINUOUS_THRESHOLD = 0.14f
+        private const val BEEP_THRESHOLD = 0.12f
+        private const val DOORWAY_BEEP_THRESHOLD = 0.14f
+        private const val CONTINUOUS_THRESHOLD = 0.08f
+        private const val GUIDANCE_THRESHOLD = 0.05f
         private const val CONTINUOUS_SWITCH_MARGIN = 0.14f
         private const val CONTINUOUS_HOLD_MS = 850L
-        private const val CONTINUOUS_MIN_FREQ = 480f
-        private const val CONTINUOUS_MAX_FREQ = 880f
-        private const val WARNING_MIN_FREQ = 920f
-        private const val WARNING_MAX_FREQ = 1400f
+        private const val GUIDANCE_HOLD_MS = 550L
+        private const val CONTINUOUS_MIN_FREQ = 520f
+        private const val CONTINUOUS_MAX_FREQ = 980f
+        private const val GUIDANCE_MIN_FREQ = 420f
+        private const val GUIDANCE_MAX_FREQ = 760f
+        private const val WARNING_MIN_FREQ = 980f
+        private const val WARNING_MAX_FREQ = 1480f
     }
 }

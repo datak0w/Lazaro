@@ -41,15 +41,18 @@ class ExitGuideAnnouncer @Inject constructor() {
     }
 
     fun buildApproachCue(
-        label: String,
+        label: String = "obstáculo",
         approach: ApproachState,
         corridor: CorridorState,
     ): DoorwayVoiceCue? {
         if (!approach.announceReady) return null
+        val distance = SpatialPhraseBuilder.formatDistance(
+            SpatialPhraseBuilder.objectDistanceForCorridor(corridor),
+        )
         return DoorwayVoiceCue(
-            message = SpatialPhraseBuilder.approachObjectPhrase(label, corridor, approach),
+            message = "Obstáculo delante a $distance. Usa el bastón.",
             debounceMs = APPROACH_DEBOUNCE_MS,
-            cueId = "approach_$label",
+            cueId = "approach_obstacle",
         )
     }
 

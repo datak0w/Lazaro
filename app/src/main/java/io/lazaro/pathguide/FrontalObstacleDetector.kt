@@ -36,7 +36,7 @@ class FrontalObstacleDetector {
         return FrontalObstacleState(
             blocked = blockedLatch,
             severity = emaSeverity,
-            closeRange = lowerWeight >= 0.45f && emaSeverity >= deactivate,
+            closeRange = lowerWeight >= 0.30f && emaSeverity >= deactivate,
         )
     }
 

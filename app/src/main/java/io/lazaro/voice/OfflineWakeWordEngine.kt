@@ -73,7 +73,10 @@ class OfflineWakeWordEngine @Inject constructor(
     }
 
     fun stop() {
+        // Cortar callbacks ANTES de stop interno para no re-disparar wake
+        // (partial+final del mismo «Lázaro» tras pause).
         running.set(false)
+        onWakeWord = null
         stopInternal()
     }
 
@@ -147,6 +150,7 @@ class OfflineWakeWordEngine @Inject constructor(
 
     private fun handleHypothesis(hypothesis: String?) {
         if (!running.get() || hypothesis.isNullOrBlank()) return
+        val callback = onWakeWord ?: return
 
         val text = extractText(hypothesis)
         if (text.isBlank() || text == "[unk]") return
@@ -156,7 +160,9 @@ class OfflineWakeWordEngine @Inject constructor(
         if (now - lastDetectionMs < DETECTION_COOLDOWN_MS) return
         lastDetectionMs = now
 
-        onWakeWord?.invoke()
+        // Un solo disparo por detección; evita 2º wake que corta el STT pendiente
+        onWakeWord = null
+        callback.invoke()
     }
 
     private fun matchesWakeHypothesis(text: String): Boolean {
@@ -194,7 +200,7 @@ class OfflineWakeWordEngine @Inject constructor(
         private const val MODEL_DIR_NAME = "vosk-model-small-es-0.42"
         private const val MODEL_URL =
             "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"
-        private const val DETECTION_COOLDOWN_MS = 2_500L
+        private const val DETECTION_COOLDOWN_MS = 4_000L
 
         private fun isValidModel(modelRoot: File): Boolean {
             return File(modelRoot, "conf/model.conf").exists() &&

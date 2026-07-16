@@ -24,11 +24,18 @@ data class CanonicalProfilePoint(
 data class RouteMatchState(
     val routeId: Long,
     val polylineIndex: Int,
+    val profileIndex: Int = 0,
     val distanceAlongM: Float,
     val lateralOffsetM: Float,
     val confidence: Float,
     val inReplaySegment: Boolean,
     val expectedPoint: CanonicalProfilePoint?,
+    val heatmapObstacleHits: Int = 0,
+    val heatmapVariance: Float = 0f,
+    val heatmapSafeSide: String = "UNKNOWN",
+    val heatmapMeanLeft: Float = 0f,
+    val heatmapMeanRight: Float = 0f,
+    val heatmapConfidence: Float = 0f,
 )
 
 object RouteCodec {

@@ -3,6 +3,7 @@ package io.lazaro.navigation
 import android.content.Context
 import android.os.Bundle
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.lazaro.voice.TextToSpeechManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -11,8 +12,11 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
-import io.lazaro.voice.TextToSpeechManager
 
+/**
+ * Traduce notificaciones de Google Maps a tips claros para ciegos
+ * (Maps + última visión de acera). IMU afina el giro en PathGuide.
+ */
 @Singleton
 class NavigationGuidanceMonitor @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -24,6 +28,7 @@ class NavigationGuidanceMonitor @Inject constructor(
     private val active = AtomicBoolean(false)
     private var lastAnnounced: String? = null
     private var lastAnnouncedMs = 0L
+    private var lastActionTip: String? = null
     private var speakingMaps = false
 
     fun startNavigation() {
@@ -31,6 +36,7 @@ class NavigationGuidanceMonitor @Inject constructor(
         audioCoordinator.startNavigation()
         lastAnnounced = null
         lastAnnouncedMs = 0L
+        lastActionTip = null
     }
 
     fun stopNavigation() {
@@ -39,6 +45,7 @@ class NavigationGuidanceMonitor @Inject constructor(
         audioCoordinator.stopNavigation()
         lastAnnounced = null
         lastAnnouncedMs = 0L
+        lastActionTip = null
         textToSpeechManager.stop()
     }
 
@@ -58,11 +65,23 @@ class NavigationGuidanceMonitor @Inject constructor(
         val instructionType = MapsNavigationParser.classifyInstruction(instruction)
         mapsVisionFusionCoordinator.onMapsInstruction(instructionType, instruction)
 
+        val tip = BlindNavigationPhraseBuilder.announceFromMaps(
+            instruction = instruction,
+            type = instructionType,
+            streetLayout = audioCoordinator.lastStreetLayout(),
+        )
+        // Evitar repetir el mismo tip de acción en ráfaga (Maps spamea notifs)
+        if (tip == lastActionTip && System.currentTimeMillis() - lastAnnouncedMs < MIN_SAME_TIP_MS) {
+            lastAnnounced = instruction
+            return
+        }
+
         val now = System.currentTimeMillis()
         if (now - lastAnnouncedMs < MIN_ANNOUNCE_INTERVAL_MS) return
 
         lastAnnounced = instruction
         lastAnnouncedMs = now
+        lastActionTip = tip
 
         scope.launch {
             if (speakingMaps) return@launch
@@ -71,7 +90,8 @@ class NavigationGuidanceMonitor @Inject constructor(
                 awaitSpeechWindow()
                 audioCoordinator.onMapsInstructionStarting(instruction)
                 TurnHapticFeedback.pulseForInstruction(context, instruction)
-                textToSpeechManager.speak(instruction)
+                // Tip Lazaro (acción clara + acera + metros), no el texto crudo de Maps
+                textToSpeechManager.speak(tip)
             } finally {
                 audioCoordinator.onMapsInstructionFinished()
                 speakingMaps = false
@@ -92,7 +112,8 @@ class NavigationGuidanceMonitor @Inject constructor(
     }
 
     companion object {
-        private const val MIN_ANNOUNCE_INTERVAL_MS = 5_000L
+        private const val MIN_ANNOUNCE_INTERVAL_MS = 4_500L
+        private const val MIN_SAME_TIP_MS = 12_000L
         private const val MAX_SPEECH_WAIT_MS = 2_500L
         private const val SPEECH_POLL_MS = 120L
     }

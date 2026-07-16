@@ -102,10 +102,21 @@ object MapsNavigationParser {
 
     fun turnSide(instruction: String): TurnSide? {
         val normalized = normalize(instruction)
+        // U-turn antes que izq/der (Maps a veces dice "gira a la izquierda para dar la vuelta")
+        if (normalized.contains("u-turn") ||
+            normalized.contains("retorno") ||
+            normalized.contains("media vuelta") ||
+            normalized.contains("da la vuelta") ||
+            normalized.contains("dar la vuelta") ||
+            normalized.contains("cambio de sentido") ||
+            normalized.contains("cambiar de sentido") ||
+            normalized.contains("vuelta en u")
+        ) {
+            return TurnSide.U_TURN
+        }
         return when {
             normalized.contains("izquierda") || normalized.contains("left") -> TurnSide.LEFT
             normalized.contains("derecha") || normalized.contains("right") -> TurnSide.RIGHT
-            normalized.contains("u-turn") || normalized.contains("retorno") -> TurnSide.U_TURN
             else -> null
         }
     }

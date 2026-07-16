@@ -144,6 +144,10 @@
                 android:resource="@xml/lazaro_accessibility_service" />
         </service>
 
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="optional" />
+
     </application>
 
 </manifest>

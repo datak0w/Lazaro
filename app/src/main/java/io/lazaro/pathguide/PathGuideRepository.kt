@@ -32,6 +32,7 @@ class PathGuideRepository @Inject constructor(
             doorwayAlertsEnabled = prefs[KEY_DOORWAY] ?: true,
             sceneDescriptionsEnabled = prefs[KEY_SCENE] ?: true,
             sceneDescriptionIntervalSec = prefs[KEY_SCENE_INTERVAL] ?: 30,
+            depthEnhancedGuidance = prefs[KEY_DEPTH] ?: true,
         )
     }
 
@@ -48,5 +49,6 @@ class PathGuideRepository @Inject constructor(
         private val KEY_DOORWAY = booleanPreferencesKey("doorway_alerts_enabled")
         private val KEY_SCENE = booleanPreferencesKey("scene_descriptions_enabled")
         private val KEY_SCENE_INTERVAL = intPreferencesKey("scene_description_interval_sec")
+        private val KEY_DEPTH = booleanPreferencesKey("depth_enhanced_guidance")
     }
 }

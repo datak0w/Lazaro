@@ -71,8 +71,12 @@ class StopActiveSessionHandler @Inject constructor(
             return StopSessionResult.Handled(spokeMessage = true)
         }
 
+        // «Para» sin sesión activa: callar; el caller vuelve a standby en silencio.
         textToSpeechManager.stop()
         bookReaderAction.stopPlayback()
+        if (pathGuideController.isActive()) {
+            pathGuideController.stop()
+        }
         return StopSessionResult.Handled(spokeMessage = false)
     }
 }

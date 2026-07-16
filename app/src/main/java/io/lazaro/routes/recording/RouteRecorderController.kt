@@ -36,35 +36,142 @@ class RouteRecorderController @Inject constructor(
     private var activeRunId: Long? = null
     private var pendingName: String? = null
     private var pendingDestinationKey: String? = null
+    private var passiveLearn = false
 
-    fun isRecording(): Boolean = activeRunId != null
+    fun isRecording(): Boolean = activeRunId != null && !passiveLearn
+
+    fun isCapturingSamples(): Boolean = activeRunId != null
 
     fun currentRunId(): Long? = activeRunId
+
+    /** Aprendizaje pasivo mientras se sigue una ruta en modo RUTA. */
+    suspend fun startPassiveLearn(routeId: Long) {
+        if (activeRunId != null) return
+        ojenMapBundle.ensureLoaded()
+        val runId = routeRepository.startRun(routeId)
+        activeRouteId = routeId
+        activeRunId = runId
+        pendingName = routeRepository.getRoute(routeId)?.name
+        pendingDestinationKey = null
+        passiveLearn = true
+        routeRecordingSampler.start(runId)
+        routeRecordingSampler.bindGps(scope, highAccuracyLocationProvider.fixes())
+    }
+
+    /**
+     * Fusiona el run de aprendizaje pasivo en el perfil/heatmap.
+     * No detiene la cámara (eso lo hace el coordinador).
+     */
+    suspend fun finishPassiveLearn(): String? {
+        if (!passiveLearn) return null
+        val routeId = activeRouteId ?: return null
+        val runId = activeRunId ?: return null
+
+        routeRecordingSampler.stop()
+        val drained = routeRecordingSampler.drainBuffer()
+        if (drained.isNotEmpty()) {
+            routeRepository.appendObservations(drained)
+        }
+
+        val samples = routeRepository.getObservationsForRun(runId).toSamples()
+        if (samples.size < MIN_PASSIVE_SAMPLES) {
+            routeRepository.abandonRun(runId)
+            clearActive()
+            return null
+        }
+
+        val canonical = routeCanonicalizer.buildCanonical(samples)
+        if (canonical is CanonicalResult.Invalid) {
+            routeRepository.abandonRun(runId)
+            clearActive()
+            return null
+        }
+
+        val success = canonical as CanonicalResult.Success
+        val existingRoute = routeRepository.getRoute(routeId) ?: run {
+            clearActive()
+            return null
+        }
+        val previousRuns = existingRoute.runCount.coerceAtLeast(1)
+        val oldProfile = RouteCodec.decodeProfile(existingRoute.canonicalProfileJson)
+        val mergedProfile = if (oldProfile.isNotEmpty()) {
+            routeHeatmapBuilder.mergeProfiles(
+                existing = oldProfile,
+                newProfile = success.profile,
+                existingWeight = previousRuns.toFloat(),
+                newWeight = success.qualityScore * 0.85f,
+            )
+        } else {
+            success.profile
+        }
+
+        val newRunCount = previousRuns + 1
+        routeRepository.updateRoute(
+            existingRoute.copy(
+                canonicalProfileJson = RouteCodec.encodeProfile(mergedProfile),
+                qualityScore = ((existingRoute.qualityScore + success.qualityScore) / 2f)
+                    .coerceIn(0f, 1f),
+                runCount = newRunCount,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+        routeRepository.finishRun(runId, routeRecordingSampler.sampleCount(), routeRecordingSampler.averageAccuracy())
+
+        val allRuns = routeRepository.getRunsForRoute(routeId).map { run ->
+            routeRepository.getObservationsForRun(run.id).toSamples()
+        }
+        val heatmap = routeHeatmapBuilder.build(routeId, mergedProfile, allRuns)
+        routeRepository.saveHeatmap(routeId, heatmap)
+
+        val name = existingRoute.name
+        clearActive()
+        return "He aprendido más de la ruta $name. Ya van $newRunCount recorridos."
+    }
+
+    private fun clearActive() {
+        activeRouteId = null
+        activeRunId = null
+        pendingName = null
+        pendingDestinationKey = null
+        passiveLearn = false
+    }
 
     suspend fun startRecording(
         name: String,
         destinationKey: String? = null,
+        existingRouteId: Long? = null,
     ): ActionResult {
         if (isRecording()) {
             return ActionResult.Error("Ya hay una grabación en curso. Di para de grabar primero.")
         }
-        val routes = routeRepository.getAllRoutes()
-        if (routes.size >= RouteRepository.MAX_ROUTES) {
-            return ActionResult.Error("Has llegado al máximo de ${RouteRepository.MAX_ROUTES} rutas guardadas.")
-        }
 
         ojenMapBundle.ensureLoaded()
 
-        val routeId = routeRepository.insertRoute(
-            SavedRoute(
-                name = name,
-                destinationKey = destinationKey,
-            ),
-        )
+        val routeId: Long
+        val displayName: String
+        if (existingRouteId != null) {
+            val existing = routeRepository.getRoute(existingRouteId)
+                ?: return ActionResult.Error("No encuentro esa ruta para aprender más.")
+            routeId = existing.id
+            displayName = existing.name
+        } else {
+            val routes = routeRepository.getAllRoutes()
+            if (routes.size >= RouteRepository.MAX_ROUTES) {
+                return ActionResult.Error("Has llegado al máximo de ${RouteRepository.MAX_ROUTES} rutas guardadas.")
+            }
+            routeId = routeRepository.insertRoute(
+                SavedRoute(
+                    name = name,
+                    destinationKey = destinationKey,
+                ),
+            )
+            displayName = name
+        }
+
         val runId = routeRepository.startRun(routeId)
         activeRouteId = routeId
         activeRunId = runId
-        pendingName = name
+        pendingName = displayName
         pendingDestinationKey = destinationKey
 
         routeRecordingSampler.start(runId)
@@ -77,9 +184,12 @@ class RouteRecorderController @Inject constructor(
             return ActionResult.Error("No pude activar la cámara para grabar la ruta.")
         }
 
-        return ActionResult.Success(
-            "Grabando ruta $name. Camina con calma el trayecto completo. Di para de grabar al llegar.",
-        )
+        val learnMsg = if (existingRouteId != null) {
+            "Regrabando ruta $displayName para afinarla. Camina el mismo trayecto. Di para de grabar al llegar."
+        } else {
+            "Grabando ruta $displayName. Camina con calma el trayecto completo. Di para de grabar al llegar."
+        }
+        return ActionResult.Success(learnMsg)
     }
 
     suspend fun stopRecording(): ActionResult {
@@ -95,27 +205,34 @@ class RouteRecorderController @Inject constructor(
         val samples = routeRepository.getObservationsForRun(runId).toSamples()
         val canonical = routeCanonicalizer.buildCanonical(samples)
         if (canonical is CanonicalResult.Invalid) {
-            routeRepository.deleteRoute(routeId)
+            // No borrar la ruta si era un re-run sobre una existente
+            val keepRoute = (routeRepository.getRoute(routeId)?.runCount ?: 0) > 0
+            if (!keepRoute) {
+                routeRepository.deleteRoute(routeId)
+            } else {
+                routeRepository.abandonRun(runId)
+            }
             pathGuideController.stop()
-            activeRouteId = null
-            activeRunId = null
+            clearActive()
             return ActionResult.Error(canonical.reason)
         }
 
         val success = canonical as CanonicalResult.Success
         val existingRoute = routeRepository.getRoute(routeId)!!
-        val mergedProfile = if (existingRoute.runCount > 0) {
+        val previousRuns = existingRoute.runCount.coerceAtLeast(0)
+        val mergedProfile = if (previousRuns > 0) {
             val oldProfile = RouteCodec.decodeProfile(existingRoute.canonicalProfileJson)
             routeHeatmapBuilder.mergeProfiles(
                 existing = oldProfile,
                 newProfile = success.profile,
-                existingWeight = existingRoute.runCount.toFloat(),
+                existingWeight = previousRuns.toFloat().coerceAtLeast(1f),
                 newWeight = success.qualityScore,
             )
         } else {
             success.profile
         }
 
+        val newRunCount = previousRuns + 1
         routeRepository.updateRoute(
             existingRoute.copy(
                 canonicalPolyline = success.polylineJson,
@@ -126,7 +243,7 @@ class RouteRecorderController @Inject constructor(
                 endLng = success.endLng,
                 totalLengthM = success.totalLengthM,
                 qualityScore = success.qualityScore,
-                runCount = 1,
+                runCount = newRunCount,
                 updatedAt = System.currentTimeMillis(),
             ),
         )
@@ -142,18 +259,19 @@ class RouteRecorderController @Inject constructor(
         }
         val heatmap = routeHeatmapBuilder.build(routeId, mergedProfile, allRuns)
         routeRepository.saveHeatmap(routeId, heatmap)
-        routeRepository.incrementRunCount(routeRepository.getRoute(routeId)!!, success.qualityScore)
 
         pathGuideController.stop()
-        activeRouteId = null
-        activeRunId = null
-        pendingName = null
-        pendingDestinationKey = null
+        clearActive()
 
         val name = existingRoute.name
+        val learnHint = if (newRunCount > 1) {
+            " He aprendido más de esta ruta ($newRunCount recorridos)."
+        } else {
+            ""
+        }
         return ActionResult.Success(
             "Ruta $name guardada. ${success.totalLengthM.toInt()} metros, " +
-                "${samples.size} muestras. Ya puedes decir llévame a $name para usarla.",
+                "${samples.size} muestras.$learnHint Ya puedes decir llévame a $name para usarla.",
         )
     }
 
@@ -165,8 +283,9 @@ class RouteRecorderController @Inject constructor(
         obstacleLabel: String?,
         lat: Double,
         lng: Double,
+        phase: String = if (passiveLearn) "REPLAY_LEARN" else "RECORDING",
     ) {
-        if (!isRecording()) return
+        if (!isCapturingSamples()) return
         val terrain = ojenMapBundle.classifySegment(lat, lng)
         routeRecordingSampler.onCorridorFrame(
             corridor = corridor,
@@ -175,16 +294,21 @@ class RouteRecorderController @Inject constructor(
             roadSide = roadSide,
             segmentType = ojenMapBundle.segmentTypeKey(terrain),
             obstacleLabel = obstacleLabel,
+            phase = phase,
         )
     }
 
     fun appendPeriodicFlush() {
-        if (!isRecording()) return
+        if (!isCapturingSamples()) return
         scope.launch {
             val batch = routeRecordingSampler.drainBuffer()
             if (batch.isNotEmpty()) {
                 routeRepository.appendObservations(batch)
             }
         }
+    }
+
+    companion object {
+        private const val MIN_PASSIVE_SAMPLES = 20
     }
 }

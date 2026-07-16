@@ -18,6 +18,7 @@ enum class WakeWordStatus {
     ERROR,
 }
 
+/** Wake word con Vosk (offline). Google STT solo para el comando. */
 @Singleton
 class WakeWordController @Inject constructor(
     private val offlineWakeWordEngine: OfflineWakeWordEngine,
@@ -57,6 +58,8 @@ class WakeWordController @Inject constructor(
     }
 
     fun pauseForCommand() {
+        restartJob?.cancel()
+        restartJob = null
         microphoneArbitrator.acquireCommandCapture()
     }
 
@@ -68,7 +71,7 @@ class WakeWordController @Inject constructor(
         microphoneArbitrator.forcePassiveMode()
         if (!shouldRun) return
         restartJob?.cancel()
-        scope?.launch {
+        restartJob = scope?.launch {
             delay(ENSURE_PASSIVE_DELAY_MS)
             if (shouldRun && microphoneArbitrator.currentMode() == MicrophoneMode.PASSIVE_WAKE_WORD) {
                 startPassiveEngine()
@@ -92,7 +95,7 @@ class WakeWordController @Inject constructor(
         if (microphoneArbitrator.currentMode() != MicrophoneMode.PASSIVE_WAKE_WORD) return
 
         _status.value = WakeWordStatus.STARTING
-        val path = modelPath ?: offlineWakeWordEngine.ensureModel().getOrElse { error ->
+        val path = modelPath ?: offlineWakeWordEngine.ensureModel().getOrElse {
             _status.value = WakeWordStatus.ERROR
             scheduleRestart()
             return

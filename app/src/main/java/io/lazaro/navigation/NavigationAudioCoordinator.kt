@@ -1,6 +1,7 @@
 package io.lazaro.navigation
 
 import io.lazaro.pathguide.MapsInstructionType
+import io.lazaro.pathguide.StreetLayoutState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,10 @@ class NavigationAudioCoordinator @Inject constructor() {
     private var turnWindowUntilMs = 0L
     private var lastInstructionType = MapsInstructionType.OTHER
     private var crossSearchUntilMs = 0L
+    @Volatile
+    private var lastStreetLayout: StreetLayoutState? = null
+    @Volatile
+    private var lastFrontalBlocked = false
 
     fun startNavigation() {
         navigationActive.set(true)
@@ -34,6 +39,8 @@ class NavigationAudioCoordinator @Inject constructor() {
         turnWindowUntilMs = 0L
         lastInstructionType = MapsInstructionType.OTHER
         crossSearchUntilMs = 0L
+        lastStreetLayout = null
+        lastFrontalBlocked = false
         _lastMapsInstruction.value = null
     }
 
@@ -46,6 +53,8 @@ class NavigationAudioCoordinator @Inject constructor() {
         turnWindowUntilMs = 0L
         lastInstructionType = MapsInstructionType.OTHER
         crossSearchUntilMs = 0L
+        lastStreetLayout = null
+        lastFrontalBlocked = false
         _lastMapsInstruction.value = null
     }
 
@@ -62,15 +71,26 @@ class NavigationAudioCoordinator @Inject constructor() {
         val now = System.currentTimeMillis()
         mapsCooldownUntilMs = now + MAPS_BEEP_COOLDOWN_MS
         lastMapsInstructionMs = now
-        lastTurnSide = MapsNavigationParser.turnSide(instruction)
         lastInstructionType = MapsNavigationParser.classifyInstruction(instruction)
-        if (lastInstructionType == MapsInstructionType.TURN ||
-            lastInstructionType == MapsInstructionType.ROUNDABOUT
-        ) {
-            turnWindowUntilMs = now + TURN_WINDOW_MS
+        lastTurnSide = MapsNavigationParser.turnSide(instruction)
+        when (lastInstructionType) {
+            MapsInstructionType.TURN, MapsInstructionType.ROUNDABOUT ->
+                turnWindowUntilMs = now + TURN_WINDOW_MS
+            MapsInstructionType.STRAIGHT -> {
+                // Recto: cierra ventana de giro previa
+                lastTurnSide = null
+                turnWindowUntilMs = 0L
+            }
+            MapsInstructionType.CROSS_STREET ->
+                crossSearchUntilMs = now + CROSS_SEARCH_MS
+            MapsInstructionType.ARRIVE -> {
+                lastTurnSide = null
+                turnWindowUntilMs = 0L
+            }
+            MapsInstructionType.OTHER -> Unit
         }
-        if (lastInstructionType == MapsInstructionType.CROSS_STREET) {
-            crossSearchUntilMs = now + CROSS_SEARCH_MS
+        if (lastTurnSide == TurnSide.U_TURN) {
+            turnWindowUntilMs = now + TURN_WINDOW_MS
         }
         _lastMapsInstruction.value = instruction
     }
@@ -108,8 +128,9 @@ class NavigationAudioCoordinator @Inject constructor() {
     fun shouldDuckBeeps(): Boolean {
         if (!navigationActive.get()) return false
         if (replaySegmentActive.get()) return false
-        val now = System.currentTimeMillis()
-        return mapsSpeaking.get() || now < mapsCooldownUntilMs
+        // Solo silenciar mientras habla TTS/Maps, no en el cooldown posterior
+        // (los pitidos espaciales deben seguir oyendo tras el tip).
+        return mapsSpeaking.get()
     }
 
     fun shouldDeferMapsSpeech(): Boolean = replaySegmentActive.get()
@@ -133,6 +154,15 @@ class NavigationAudioCoordinator @Inject constructor() {
     }
 
     fun lastTurnSide(): TurnSide? = lastTurnSide
+
+    fun updateCameraContext(layout: StreetLayoutState, frontalBlocked: Boolean) {
+        lastStreetLayout = layout
+        lastFrontalBlocked = frontalBlocked
+    }
+
+    fun lastStreetLayout(): StreetLayoutState? = lastStreetLayout
+
+    fun lastFrontalBlocked(): Boolean = lastFrontalBlocked
 
     fun sceneDescriptionIntervalSec(defaultSec: Int): Int {
         return if (navigationActive.get()) NAV_SCENE_INTERVAL_SEC else defaultSec

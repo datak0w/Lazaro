@@ -22,7 +22,13 @@ class RouteAction @Inject constructor(
                     ?: routeIntentDetector.extractDestinationKey(userText)?.let { "ruta a $it" }
                     ?: "ruta ${System.currentTimeMillis() % 10_000}"
                 val destKey = routeIntentDetector.extractDestinationKey(userText)
-                routeRecorderController.startRecording(name, destKey)
+                val existingId = if (routeIntentDetector.isReRecord(userText)) {
+                    routeResolver.findByName(name)?.id
+                        ?: destKey?.let { routeRepository.findRouteByMemoryKey(it)?.id }
+                } else {
+                    null
+                }
+                routeRecorderController.startRecording(name, destKey, existingId)
             }
             RouteIntent.STOP_RECORDING -> routeRecorderController.stopRecording()
             RouteIntent.LIST_ROUTES -> listRoutes()
@@ -59,7 +65,8 @@ class RouteAction @Inject constructor(
         val started = hybridNavigationCoordinator.start(route, destination)
         return if (started) {
             ActionResult.Success(
-                "Perfecto. Uso la ruta guardada ${route.name} con Maps y guía Lazaro en los tramos grabados.",
+                "Perfecto. Uso la ruta guardada ${route.name} con Maps y guía Lazaro. " +
+                    "Cada paseo afina heatmaps y obstáculos para la próxima vez.",
                 suspendListening = true,
             )
         } else {
