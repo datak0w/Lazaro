@@ -31,9 +31,9 @@ class MemoryExtractor @Inject constructor(
                     Si no hay nada que aprender: {"items":[]}
                     Reglas:
                     - Solo hechos concretos (direcciones, teléfonos, preferencias, frases→acciones).
-                    - confidence >= 0.8 para incluir.
+                    - confidence >= 0.75 para incluir.
                     - No repetir datos que ya existen en memoria conocida.
-                    - Máximo 1 item por conversación.
+                    - Máximo 2 items por conversación; elige los más útiles.
                     """.trimIndent(),
                 )
             },
@@ -78,10 +78,18 @@ class MemoryExtractor @Inject constructor(
         val items = root.optJSONArray("items") ?: return null
         if (items.length() == 0) return null
 
-        val item = items.getJSONObject(0)
-        val confidence = item.optDouble("confidence", 0.0)
-        if (confidence < 0.8) return null
+        // Prefer first valid item with confidence >= 0.75
+        for (i in 0 until minOf(items.length(), 2)) {
+            val item = items.getJSONObject(i)
+            val confidence = item.optDouble("confidence", 0.0)
+            if (confidence < 0.75) continue
+            val proposal = parseItem(item) ?: continue
+            return proposal
+        }
+        return null
+    }
 
+    private suspend fun parseItem(item: JSONObject): PendingMemoryProposal? {
         return when (item.optString("type")) {
             "memory" -> {
                 val key = item.optString("key")

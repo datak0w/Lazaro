@@ -3,6 +3,7 @@ package io.lazaro.assistant
 import io.lazaro.actions.ActionExecutor
 import io.lazaro.actions.ActionResult
 import io.lazaro.audiobook.BookReaderAction
+import io.lazaro.ai.AssistantReply
 import io.lazaro.ai.GeminiOrchestrator
 import io.lazaro.ai.MemoryExtractor
 import io.lazaro.memory.MemoryContextBuilder
@@ -68,6 +69,8 @@ class AssistantController @Inject constructor(
     private val wakeWordNotifier: WakeWordNotifier,
     private val softWaitToneEngine: SoftWaitToneEngine,
     private val routeRecorderController: RouteRecorderController,
+    private val activeSessionTracker: ActiveSessionTracker,
+    private val proactiveSuggestionEngine: ProactiveSuggestionEngine,
 ) {
     private val _uiState = MutableStateFlow(
         AssistantUiState(hasApiKey = geminiOrchestrator.hasApiKey()),
@@ -277,6 +280,24 @@ class AssistantController @Inject constructor(
         isSpeaking = false
         textToSpeechManager.stop()
         bookReaderAction.stopPlayback()
+
+        // Si hay navegación/ruta/paseo/grabación, pausar para chat sin cerrar la sesión.
+        syncActiveSessionFromHardware()
+        if (activeSessionTracker.hasActiveSession() || navigationSessionManager.isNavigationActive()) {
+            if (navigationSessionManager.isNavigationActive() ||
+                activeSessionTracker.snapshot()?.kind in setOf(
+                    ActiveSessionKind.NAVIGATION,
+                    ActiveSessionKind.ROUTE_REPLAY,
+                )
+            ) {
+                navigationSessionManager.pauseForChat()
+            } else {
+                activeSessionTracker.pauseForChat()
+            }
+            navigationGuidanceMonitor.lastActionTip()?.let {
+                activeSessionTracker.setLastManeuverHint(it)
+            }
+        }
         speechRecognitionManager.stopListening()
 
         wakeWordNotifier.playActivationSound()
@@ -489,8 +510,36 @@ class AssistantController @Inject constructor(
                 }
                 else -> {
                     silentRetries = 0
-                    listenProfile = ListeningProfile.STANDBY
-                    returnToStandby(delayMs = 0L)
+                    val suggestion = proactiveSuggestionEngine.suggestionAfterWakeWithoutCommand()
+                    if (!suggestion.isNullOrBlank()) {
+                        if (activeSessionTracker.isPausedForChat()) {
+                            actionExecutor.setPendingResumeSession(suggestion)
+                            conversationContext.recordPending("reanudar sesión", suggestion)
+                        }
+                        speakOnly(suggestion)
+                        if (actionExecutor.hasPendingConfirmation()) {
+                            resumePendingInput()
+                        } else {
+                            openConversationWindow()
+                            resumeListening(directAfter = true)
+                        }
+                    } else {
+                        listenProfile = ListeningProfile.STANDBY
+                        // Si estábamos en chat sobre nav, reanudar automáticamente al silencio
+                        if (activeSessionTracker.isPausedForChat()) {
+                            val kind = activeSessionTracker.snapshot()?.kind
+                            if (kind == ActiveSessionKind.NAVIGATION ||
+                                kind == ActiveSessionKind.ROUTE_REPLAY
+                            ) {
+                                navigationSessionManager.resumeFromChat()
+                            } else {
+                                activeSessionTracker.resumeFromChat()
+                            }
+                            enterNavigationPause()
+                        } else {
+                            returnToStandby(delayMs = 0L)
+                        }
+                    }
                 }
             }
             return
@@ -514,30 +563,41 @@ class AssistantController @Inject constructor(
 
             val reply = geminiOrchestrator.handleUserMessage(text)
             resetCounters()
-            conversationContext.recordTurn(text, reply.spokenText)
+            val spoken = maybeAppendResumeOffer(reply)
+            conversationContext.recordTurn(
+                userMessage = text,
+                assistantMessage = spoken,
+                sessionMarker = activeSessionTracker.historyMarker(),
+            )
             if (actionExecutor.hasPendingConfirmation()) {
                 conversationContext.recordPending(
                     hint = actionExecutor.getPendingHint(),
-                    prompt = actionExecutor.getLastPromptText().ifBlank { reply.spokenText },
+                    prompt = actionExecutor.getLastPromptText().ifBlank { spoken },
                 )
             } else if (!reply.skipAutoLearn) {
                 conversationContext.clearPending()
             }
-            _uiState.update { it.copy(lastResponse = reply.spokenText) }
+            _uiState.update { it.copy(lastResponse = spoken) }
 
             val needsDirectInput = actionExecutor.hasPendingConfirmation()
             val keepConversationOpen = SamsungVoiceCompat.allowsConversationAutoListen() &&
                 !needsDirectInput &&
                 !reply.suspendListening &&
-                reply.spokenText.isNotBlank()
+                spoken.isNotBlank()
 
-            speakOnly(reply.spokenText)
+            speakOnly(spoken)
 
             if (!isActive) return
 
-            if (reply.suspendListening) {
+            val resumedNav = reply.actionTaken &&
+                spoken.contains("Seguimos hacia", ignoreCase = true) &&
+                activeSessionTracker.snapshot()?.phase == ActiveSessionPhase.RUNNING
+
+            if (resumedNav) {
                 conversationWindowJob?.cancel()
-                // Si hay launch diferido, ejecutarlo tras el TTS; si no, la acción ya abrió la app.
+                enterNavigationPause()
+            } else if (reply.suspendListening) {
+                conversationWindowJob?.cancel()
                 val mapsOk = if (actionExecutor.hasDeferredMapsLaunch()) {
                     actionExecutor.runDeferredMapsLaunch()
                 } else {
@@ -548,8 +608,15 @@ class AssistantController @Inject constructor(
                         pathGuideController.currentMode() == PathGuideMode.NAVEGACION ||
                         pathGuideController.currentMode() == PathGuideMode.RUTA
                 if (mapsOk || navAlready) {
-                    if (!navigationSessionManager.isNavigationActive()) {
-                        navigationSessionManager.startSession()
+                    val label = extractNavigationLabel(text, spoken)
+                    val routeReplay = pathGuideController.currentMode() == PathGuideMode.RUTA
+                    if (!navigationSessionManager.isNavigationActive() ||
+                        !activeSessionTracker.hasActiveSession()
+                    ) {
+                        navigationSessionManager.startSession(label = label, routeReplay = routeReplay)
+                    } else {
+                        activeSessionTracker.updateLabel(label)
+                        activeSessionTracker.resumeFromChat()
                     }
                     scope?.launch {
                         val mode = pathGuideController.currentMode()
@@ -574,16 +641,24 @@ class AssistantController @Inject constructor(
                 scheduleListen(delayMs = SamsungVoiceCompat.postSpeechDelayMs)
             } else {
                 conversationWindowJob?.cancel()
-                restoreWakeWordPassive()
-                returnToStandby()
+                if (activeSessionTracker.isPausedForChat()) {
+                    // Tras orden lateral sin confirmación pendiente: volver a wake sobre la sesión
+                    enterNavigationPause()
+                } else {
+                    restoreWakeWordPassive()
+                    returnToStandby()
+                }
             }
 
-            if (!reply.skipAutoLearn && !reply.actionTaken && !reply.suspendListening) {
-                scope?.launch { backgroundMaybeLearn(text, reply.spokenText) }
+            // Auto-learn: permitir tras acciones útiles salvo nav suspend / pending / resume prompt
+            val awaitingResume = activeSessionTracker.snapshot()?.awaitingResumePrompt == true
+            if (!reply.skipAutoLearn && !reply.suspendListening && !awaitingResume) {
+                if (!reply.actionTaken || looksLikeMemorableAction(text)) {
+                    scope?.launch { backgroundMaybeLearn(text, spoken) }
+                }
             }
         } catch (e: CancellationException) {
             softWaitToneEngine.stop()
-            // Interrupción: handleInterruptCommand o interruptAndListen retoman.
         } catch (e: Exception) {
             softWaitToneEngine.stop()
             speakOnly("Algo falló. Sigo aquí.")
@@ -599,9 +674,68 @@ class AssistantController @Inject constructor(
         }
     }
 
+    private suspend fun maybeAppendResumeOffer(reply: AssistantReply): String {
+        if (reply.suspendListening) return reply.spokenText
+        if (actionExecutor.hasPendingConfirmation()) return reply.spokenText
+        if (!activeSessionTracker.isPausedForChat()) return reply.spokenText
+        val offer = proactiveSuggestionEngine.suggestionAfterSideOrder() ?: return reply.spokenText
+        if (reply.spokenText.contains("¿Seguimos", ignoreCase = true) ||
+            reply.spokenText.contains("reanud", ignoreCase = true)
+        ) {
+            return reply.spokenText
+        }
+        actionExecutor.setPendingResumeSession(offer)
+        return "${reply.spokenText.trim()} $offer"
+    }
+
+    private fun extractNavigationLabel(userText: String, spoken: String): String {
+        val fromUser = Regex(
+            """(?i)(?:a|hacia|hasta)\s+(.+)$""",
+        ).find(userText.trim())?.groupValues?.getOrNull(1)?.trim()
+        if (!fromUser.isNullOrBlank() && fromUser.length < 40) return fromUser
+        val fromSpeech = Regex(
+            """(?i)(?:hacia|hasta|a)\s+([^?.!]+)""",
+        ).find(spoken)?.groupValues?.getOrNull(1)?.trim()
+        if (!fromSpeech.isNullOrBlank() && fromSpeech.length < 40) return fromSpeech
+        return activeSessionTracker.snapshot()?.label ?: "destino"
+    }
+
+    private fun looksLikeMemorableAction(userText: String): Boolean {
+        val t = userText.lowercase(Locale.getDefault())
+        return t.contains("casa") || t.contains("guarda") || t.contains("recuerda") ||
+            t.contains("mi ") || t.contains("farmacia") || t.contains("trabajo")
+    }
+
+    private fun syncActiveSessionFromHardware() {
+        if (activeSessionTracker.hasActiveSession()) return
+        when (pathGuideController.currentMode()) {
+            PathGuideMode.NAVEGACION ->
+                activeSessionTracker.start(ActiveSessionKind.NAVIGATION, "destino")
+            PathGuideMode.RUTA ->
+                activeSessionTracker.start(ActiveSessionKind.ROUTE_REPLAY, "ruta")
+            PathGuideMode.PASEO ->
+                activeSessionTracker.start(ActiveSessionKind.WALK, "paseo")
+            PathGuideMode.GRABANDO ->
+                activeSessionTracker.start(ActiveSessionKind.RECORDING, "ruta nueva")
+            else -> {
+                if (routeRecorderController.isRecording()) {
+                    activeSessionTracker.start(ActiveSessionKind.RECORDING, "ruta nueva")
+                } else if (navigationGuidanceMonitor.isNavigationActive()) {
+                    activeSessionTracker.start(ActiveSessionKind.NAVIGATION, "destino")
+                }
+            }
+        }
+    }
+
     private suspend fun backgroundMaybeLearn(userText: String, assistantText: String) {
-        if (memoryRepository.getLatestProposal() != null) return
+        val latest = memoryRepository.getLatestProposal()
+        if (latest != null) {
+            val ageMs = System.currentTimeMillis() - latest.createdAt
+            if (ageMs < STALE_PROPOSAL_MS) return
+            memoryRepository.rejectLatestProposal()
+        }
         if (actionExecutor.hasPendingConfirmation()) return
+        if (activeSessionTracker.snapshot()?.awaitingResumePrompt == true) return
 
         val context = memoryContextBuilder.buildContextBlock()
         val proposal = memoryExtractor.extractFromConversation(userText, assistantText, context)
@@ -669,9 +803,11 @@ class AssistantController @Inject constructor(
         restoreWakeWordPassive()
         resetCounters()
         listenProfile = ListeningProfile.STANDBY
+        listeningSuspended = true
+        val label = activeSessionTracker.snapshot()?.label ?: "destino"
         markState(
             voiceState = VoiceState.Idle,
-            statusMessage = "Navegando con Maps. Di Lazaro o usa el bastón; la cámara guía con pitidos.",
+            statusMessage = "Navegando a $label. Di Lazaro para hablar; la cámara guía con pitidos.",
             awaitingTrigger = true,
         )
 
@@ -685,9 +821,34 @@ class AssistantController @Inject constructor(
     }
 
     private suspend fun resumeAfterNavigationPause() {
+        // Timeout largo: preguntar una vez si continuar; no matar la sesión en silencio.
+        if (activeSessionTracker.hasActiveSession() || navigationSessionManager.isNavigationActive()) {
+            listeningSuspended = false
+            navigationPauseJob?.cancel()
+            val question = activeSessionTracker.snapshot()?.resumeQuestion()
+                ?: "¿Seguimos con la navegación o la cancelo?"
+            actionExecutor.setPendingResumeSession(question)
+            conversationContext.recordPending("reanudar o cancelar navegación", question)
+            speakOnly(question)
+            openConversationWindow()
+            resumePendingInput()
+            // Segunda espera: si no responde, entonces sí cerrar
+            navigationPauseJob = scope?.launch {
+                delay(NAVIGATION_FOLLOWUP_MS)
+                if (!isActive) return@launch
+                if (actionExecutor.hasPendingConfirmation() &&
+                    actionExecutor.getPendingHint().contains("reanudar", ignoreCase = true)
+                ) {
+                    actionExecutor.cancelPending()
+                    listeningSuspended = false
+                    navigationSessionManager.endSession(speakConfirmation = true)
+                    returnToStandby(delayMs = 0L)
+                }
+            }
+            return
+        }
         listeningSuspended = false
         navigationPauseJob?.cancel()
-        navigationSessionManager.endSession(speakConfirmation = false)
         returnToStandby(delayMs = 0L)
     }
 
@@ -813,6 +974,8 @@ class AssistantController @Inject constructor(
         private const val STUCK_WAKE_MS = 4_000L
         private const val CONVERSATION_WINDOW_MS = 50_000L
         private const val NAVIGATION_PAUSE_MS = 45 * 60 * 1000L
+        private const val NAVIGATION_FOLLOWUP_MS = 90_000L
+        private const val STALE_PROPOSAL_MS = 10 * 60 * 1000L
         private const val WAKE_DEBOUNCE_MS = 2_000L
         private const val MIC_HANDOFF_DELAY_MS = 550L
     }

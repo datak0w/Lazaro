@@ -30,6 +30,9 @@ enum class ToolName(val id: String) {
     PlanTransitRoute("plan_transit_route"),
     StartWalkMode("start_walk_mode"),
     StopWalkMode("stop_walk_mode"),
+    ListSavedRoutes("list_saved_routes"),
+    ListSavedPlaces("list_saved_places"),
+    ResumeActiveSession("resume_active_session"),
     ;
 
     companion object {

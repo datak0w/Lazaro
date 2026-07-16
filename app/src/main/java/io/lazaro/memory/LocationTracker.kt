@@ -40,6 +40,29 @@ class LocationTracker @Inject constructor(
         }
     }
 
+    /** Descripción corta para el prompt de la IA (no escribe en trail). */
+    suspend fun describeCurrentLocationBrief(): String {
+        return try {
+            val location = fusedClient.getCurrentLocation(
+                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                CancellationTokenSource().token,
+            ).await()
+            if (location != null) {
+                reverseGeocode(location.latitude, location.longitude)
+                    ?: "coordenadas ${"%.5f".format(location.latitude)}, ${"%.5f".format(location.longitude)}"
+            } else {
+                val recent = memoryRepository.getRecentLocations(1).firstOrNull()
+                recent?.address
+                    ?: recent?.label
+                    ?: "desconocida (sin fix GPS)"
+            }
+        } catch (_: SecurityException) {
+            "sin permiso de ubicación"
+        } catch (_: Exception) {
+            "no disponible ahora"
+        }
+    }
+
     suspend fun describeTrailForLostUser(hours: Int = 6): String {
         val trail = memoryRepository.getLocationTrail(hours)
         if (trail.isEmpty()) {

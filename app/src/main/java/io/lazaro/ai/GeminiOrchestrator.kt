@@ -246,11 +246,17 @@ class GeminiOrchestrator @Inject constructor(
             )
 
         val memoryContext = memoryContextBuilder.buildContextBlock()
-        val enrichedPrompt = """
-            $memoryContext
-
-            Mensaje del usuario: $userText
-        """.trimIndent()
+        val history = conversationContext.formatRecentHistory()
+        val enrichedPrompt = buildString {
+            appendLine(memoryContext)
+            if (history.isNotBlank()) {
+                appendLine()
+                appendLine(history)
+            }
+            appendLine()
+            appendLine("=== MENSAJE ACTUAL ===")
+            append("Mensaje del usuario: $userText")
+        }
 
         return try {
             val response = generativeModel.generateContent(enrichedPrompt)

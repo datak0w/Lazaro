@@ -130,6 +130,24 @@ object ToolDefinitions {
                     parameters = emptyList(),
                     requiredParameters = emptyList(),
                 ),
+                FunctionDeclaration(
+                    name = "list_saved_routes",
+                    description = "Lista las rutas grabadas del usuario (nombres) para ofrecerlas o recordarlas.",
+                    parameters = emptyList(),
+                    requiredParameters = emptyList(),
+                ),
+                FunctionDeclaration(
+                    name = "list_saved_places",
+                    description = "Lista los sitios favoritos guardados con GPS (nombres y dirección si hay).",
+                    parameters = emptyList(),
+                    requiredParameters = emptyList(),
+                ),
+                FunctionDeclaration(
+                    name = "resume_active_session",
+                    description = "Reanuda la navegación, ruta, paseo o grabación que estaba pausada para chat.",
+                    parameters = emptyList(),
+                    requiredParameters = emptyList(),
+                ),
             ),
         ),
     )

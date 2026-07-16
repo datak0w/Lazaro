@@ -27,6 +27,7 @@ class StopActiveSessionHandler @Inject constructor(
     private val actionExecutor: ActionExecutor,
     private val routeRecorderController: RouteRecorderController,
     private val textToSpeechManager: TextToSpeechManager,
+    private val activeSessionTracker: ActiveSessionTracker,
 ) {
     fun shouldHandleStop(text: String): Boolean {
         return contextIntentDetector.isInterruptCommand(text) ||
@@ -36,14 +37,23 @@ class StopActiveSessionHandler @Inject constructor(
     suspend fun handleStop(text: String): StopSessionResult {
         if (!shouldHandleStop(text)) return StopSessionResult.NotHandled
 
-        if (navigationSessionManager.isNavigationActive()) {
+        if (navigationSessionManager.isNavigationActive() ||
+            activeSessionTracker.snapshot()?.kind in setOf(
+                ActiveSessionKind.NAVIGATION,
+                ActiveSessionKind.ROUTE_REPLAY,
+            )
+        ) {
             textToSpeechManager.stop()
             navigationSessionManager.endSession(speakConfirmation = true)
+            activeSessionTracker.clear()
             return StopSessionResult.Handled(spokeMessage = true)
         }
 
-        if (routeRecorderController.isRecording()) {
+        if (routeRecorderController.isRecording() ||
+            activeSessionTracker.snapshot()?.kind == ActiveSessionKind.RECORDING
+        ) {
             textToSpeechManager.stop()
+            activeSessionTracker.clear()
             when (val result = routeRecorderController.stopRecording()) {
                 is ActionResult.Success -> textToSpeechManager.speak(result.message)
                 is ActionResult.Error -> textToSpeechManager.speak(result.message)
@@ -52,8 +62,11 @@ class StopActiveSessionHandler @Inject constructor(
             return StopSessionResult.Handled(spokeMessage = true)
         }
 
-        if (pathGuideController.currentMode() == PathGuideMode.PASEO) {
+        if (pathGuideController.currentMode() == PathGuideMode.PASEO ||
+            activeSessionTracker.snapshot()?.kind == ActiveSessionKind.WALK
+        ) {
             textToSpeechManager.stop()
+            activeSessionTracker.clear()
             val result = walkModeAction.stop()
             if (result is ActionResult.Success) {
                 textToSpeechManager.speak(result.message)
@@ -77,6 +90,7 @@ class StopActiveSessionHandler @Inject constructor(
         if (pathGuideController.isActive()) {
             pathGuideController.stop()
         }
+        activeSessionTracker.clear()
         return StopSessionResult.Handled(spokeMessage = false)
     }
 }

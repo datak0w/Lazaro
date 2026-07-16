@@ -26,6 +26,7 @@ class NavigationGuidanceMonitor @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val active = AtomicBoolean(false)
+    private val mapsSpeechMuted = AtomicBoolean(false)
     private var lastAnnounced: String? = null
     private var lastAnnouncedMs = 0L
     private var lastActionTip: String? = null
@@ -33,6 +34,7 @@ class NavigationGuidanceMonitor @Inject constructor(
 
     fun startNavigation() {
         active.set(true)
+        mapsSpeechMuted.set(false)
         audioCoordinator.startNavigation()
         lastAnnounced = null
         lastAnnouncedMs = 0L
@@ -41,6 +43,7 @@ class NavigationGuidanceMonitor @Inject constructor(
 
     fun stopNavigation() {
         active.set(false)
+        mapsSpeechMuted.set(false)
         speakingMaps = false
         audioCoordinator.stopNavigation()
         lastAnnounced = null
@@ -51,8 +54,15 @@ class NavigationGuidanceMonitor @Inject constructor(
 
     fun isNavigationActive(): Boolean = active.get()
 
+    fun setMapsSpeechMuted(muted: Boolean) {
+        mapsSpeechMuted.set(muted)
+    }
+
+    fun lastActionTip(): String? = lastActionTip
+
     fun onMapsNotification(extras: Bundle) {
         if (!active.get()) return
+        if (mapsSpeechMuted.get()) return
         if (audioCoordinator.shouldDeferMapsSpeech()) return
 
         val title = extras.getCharSequence("android.title")?.toString().orEmpty()

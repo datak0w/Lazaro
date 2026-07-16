@@ -1,12 +1,15 @@
 package io.lazaro.actions
 
 import io.lazaro.audiobook.BookReaderAction
+import io.lazaro.assistant.ActiveSessionKind
+import io.lazaro.assistant.ActiveSessionTracker
 import io.lazaro.contacts.ContactMatch
 import io.lazaro.media.MediaCategory
 import io.lazaro.media.MediaLauncherAction
 import io.lazaro.memory.entity.CustomSkill
 import io.lazaro.memory.SkillExecutor
 import io.lazaro.messaging.WhatsAppReplyAction
+import io.lazaro.navigation.NavigationSessionManager
 import io.lazaro.news.NewsReaderAction
 import io.lazaro.receipt.ReceiptCheckerAction
 import io.lazaro.tools.CalculatorAction
@@ -19,6 +22,7 @@ import io.lazaro.pathguide.WalkModeIntentDetector
 import io.lazaro.pathguide.WalkIntent
 import io.lazaro.memory.SavedPlaceRepository
 import io.lazaro.routes.RouteAction
+import io.lazaro.routes.RouteRepository
 import io.lazaro.transit.TransitAction
 import io.lazaro.transit.TransitMode
 import javax.inject.Inject
@@ -49,6 +53,9 @@ class ActionExecutor @Inject constructor(
     private val routeAction: RouteAction,
     private val savedPlaceAction: SavedPlaceAction,
     private val savedPlaceRepository: SavedPlaceRepository,
+    private val routeRepository: RouteRepository,
+    private val activeSessionTracker: ActiveSessionTracker,
+    private val navigationSessionManager: NavigationSessionManager,
 ) {
     private var pendingConfirmation: PendingAction? = null
     private var pendingSkill: CustomSkill? = null
@@ -83,6 +90,7 @@ class ActionExecutor @Inject constructor(
             ToolName.MakeCall.id -> "confirmar la llamada"
             "execute_skill" -> "confirmar el skill"
             "confirm_memory", "confirm_skill" -> "confirmar guardar en memoria"
+            ToolName.ResumeActiveSession.id -> "reanudar la sesión activa"
             "follow_saved_route" -> "confirmar la ruta guardada"
             "delete_saved_route" -> "confirmar borrar la ruta"
             "save_saved_place" -> "confirmar guardar el sitio"
@@ -369,8 +377,66 @@ class ActionExecutor @Inject constructor(
                 }
                 prep
             }
-            ToolName.StartWalkMode -> walkModeAction.start()
-            ToolName.StopWalkMode -> walkModeAction.stop()
+            ToolName.StartWalkMode -> {
+                val result = walkModeAction.start()
+                if (result is ActionResult.Success) {
+                    activeSessionTracker.start(ActiveSessionKind.WALK, "paseo")
+                }
+                result
+            }
+            ToolName.StopWalkMode -> {
+                activeSessionTracker.clear()
+                walkModeAction.stop()
+            }
+            ToolName.ListSavedRoutes -> listSavedRoutes()
+            ToolName.ListSavedPlaces -> listSavedPlaces()
+            ToolName.ResumeActiveSession -> resumeActiveSession()
+        }
+    }
+
+    fun setPendingResumeSession(prompt: String) {
+        storePending(PendingAction(ToolName.ResumeActiveSession.id, emptyMap()), prompt)
+    }
+
+    private suspend fun listSavedRoutes(): ActionResult {
+        val routes = routeRepository.getAllRoutes()
+        if (routes.isEmpty()) {
+            return ActionResult.Success("No tienes rutas grabadas todavía.")
+        }
+        val names = routes.take(10).joinToString(", ") { it.name }
+        return ActionResult.Success("Tus rutas: $names.")
+    }
+
+    private suspend fun listSavedPlaces(): ActionResult {
+        val places = savedPlaceRepository.getAllPlaces()
+        if (places.isEmpty()) {
+            return ActionResult.Success("No tienes sitios favoritos guardados.")
+        }
+        val names = places.take(10).joinToString(", ") { place ->
+            val addr = place.address?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+            "${place.displayName}$addr"
+        }
+        return ActionResult.Success("Tus sitios: $names.")
+    }
+
+    private fun resumeActiveSession(): ActionResult {
+        val snap = activeSessionTracker.snapshot()
+            ?: return ActionResult.Error("No hay ninguna sesión en pausa para reanudar.")
+        return when (snap.kind) {
+            ActiveSessionKind.NAVIGATION,
+            ActiveSessionKind.ROUTE_REPLAY,
+            -> ActionResult.Success(navigationSessionManager.resumeFromChat())
+            ActiveSessionKind.WALK -> {
+                activeSessionTracker.resumeFromChat()
+                if (pathGuideController.currentMode() != PathGuideMode.PASEO) {
+                    // PathGuide should still be in PASEO if we only muted chat
+                }
+                ActionResult.Success("De acuerdo. Seguimos con el paseo.")
+            }
+            ActiveSessionKind.RECORDING -> {
+                activeSessionTracker.resumeFromChat()
+                ActionResult.Success("De acuerdo. Seguimos grabando.")
+            }
         }
     }
 
@@ -415,6 +481,7 @@ class ActionExecutor @Inject constructor(
                     skillExecutor.execute(skill)
                 }
             }
+            ToolName.ResumeActiveSession.id -> resumeActiveSession()
             ToolName.NavigateTo.id -> {
                 val destination = pending.args["destination"].orEmpty()
                 val lat = pending.args["latitude"]?.toDoubleOrNull()
@@ -505,14 +572,40 @@ class ActionExecutor @Inject constructor(
     }
 
     suspend fun cancelPending(): ActionResult {
-        val hadAction = pendingConfirmation != null
+        val pending = pendingConfirmation
+        val wasResume = pending?.toolName == ToolName.ResumeActiveSession.id
         pendingConfirmation = null
         pendingSkill = null
         mapsLaunchDeferrer.clear()
         lastPromptText = ""
         memoryActionHandler.rejectMemoryProposal()
+        if (wasResume) {
+            val kind = activeSessionTracker.snapshot()?.kind
+            when (kind) {
+                ActiveSessionKind.NAVIGATION,
+                ActiveSessionKind.ROUTE_REPLAY,
+                -> {
+                    navigationSessionManager.endSession(speakConfirmation = false)
+                    return ActionResult.Success("Vale, cancelo la navegación.")
+                }
+                ActiveSessionKind.WALK -> {
+                    activeSessionTracker.clear()
+                    walkModeAction.stop()
+                    return ActionResult.Success("Vale, paro el paseo.")
+                }
+                ActiveSessionKind.RECORDING -> {
+                    activeSessionTracker.clear()
+                    return ActionResult.Success("Vale, dejo la grabación en pausa. Di para de grabar si quieres guardarla.")
+                }
+                null -> Unit
+            }
+        }
         return ActionResult.Success(
-            if (hadAction) "De acuerdo, cancelado. Di Lazaro cuando quieras otra cosa." else "De acuerdo, no lo guardaré.",
+            if (pending != null) {
+                "De acuerdo, cancelado. Di Lazaro cuando quieras otra cosa."
+            } else {
+                "De acuerdo, no lo guardaré."
+            },
         )
     }
 
