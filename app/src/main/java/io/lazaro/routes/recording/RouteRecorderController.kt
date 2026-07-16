@@ -12,6 +12,7 @@ import io.lazaro.routes.fusion.toEntity
 import io.lazaro.routes.fusion.toSamples
 import io.lazaro.routes.location.HighAccuracyLocationProvider
 import io.lazaro.routes.map.OjenMapBundle
+import io.lazaro.routes.map.OjenOdmBundle
 import io.lazaro.routes.model.RouteCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +30,7 @@ class RouteRecorderController @Inject constructor(
     private val routeCanonicalizer: RouteCanonicalizer,
     private val routeHeatmapBuilder: RouteHeatmapBuilder,
     private val ojenMapBundle: OjenMapBundle,
+    private val ojenOdmBundle: OjenOdmBundle,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -48,6 +50,7 @@ class RouteRecorderController @Inject constructor(
     suspend fun startPassiveLearn(routeId: Long) {
         if (activeRunId != null) return
         ojenMapBundle.ensureLoaded()
+        ojenOdmBundle.ensureLoaded()
         val runId = routeRepository.startRun(routeId)
         activeRouteId = routeId
         activeRunId = runId
@@ -146,6 +149,7 @@ class RouteRecorderController @Inject constructor(
         }
 
         ojenMapBundle.ensureLoaded()
+        ojenOdmBundle.ensureLoaded()
 
         val routeId: Long
         val displayName: String
@@ -286,13 +290,19 @@ class RouteRecorderController @Inject constructor(
         phase: String = if (passiveLearn) "REPLAY_LEARN" else "RECORDING",
     ) {
         if (!isCapturingSamples()) return
-        val terrain = ojenMapBundle.classifySegment(lat, lng)
+        val odmTag = ojenOdmBundle.segmentTypeKey(lat, lng)
+        val segmentType = if (odmTag != null) {
+            odmTag
+        } else {
+            val terrain = ojenMapBundle.classifySegment(lat, lng)
+            ojenMapBundle.segmentTypeKey(terrain)
+        }
         routeRecordingSampler.onCorridorFrame(
             corridor = corridor,
             junction = junction,
             safeSide = safeSide,
             roadSide = roadSide,
-            segmentType = ojenMapBundle.segmentTypeKey(terrain),
+            segmentType = segmentType,
             obstacleLabel = obstacleLabel,
             phase = phase,
         )

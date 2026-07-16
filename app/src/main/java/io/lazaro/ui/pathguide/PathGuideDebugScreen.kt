@@ -41,6 +41,7 @@ import io.lazaro.pathguide.PathGuideDebugState
 import io.lazaro.pathguide.MapsInstructionType
 import io.lazaro.pathguide.OutdoorNavPhase
 import io.lazaro.pathguide.PathGuideRoi
+import io.lazaro.pathguide.DepthGuidanceMode
 import io.lazaro.pathguide.PerceptionSource
 import io.lazaro.pathguide.RoadSide
 import io.lazaro.pathguide.SidewalkAlignment
@@ -480,8 +481,20 @@ private fun DebugMetricsPanel(
                     MaterialTheme.colorScheme.error
                 },
             )
+            if (state.odmScore != null || state.onOdmCorridor) {
+                Text(
+                    "ODM: score ${((state.odmScore ?: 0f) * 100).toInt()}% | " +
+                        "along ${state.odmAlongM?.let { "%.0f m".format(it) } ?: "—"} | " +
+                        "pendiente ${state.odmGradePct?.let { "%.1f%%".format(it) } ?: "—"} | " +
+                        if (state.onOdmCorridor) "en corredor" else "fuera",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
             Text(
-                "Percepción: ${perceptionLabel(state.perceptionSource)} | " +
+                "Hardware: ${state.deviceLabel.ifBlank { "—" }} | " +
+                    "modo ${depthModeLabel(state.depthGuidanceMode)} | " +
+                    "percepción ${perceptionLabel(state.perceptionSource)} | " +
                     "dist. frontal ${state.frontalDistanceM?.let { "%.1f m".format(it) } ?: "—"}",
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -621,6 +634,12 @@ private fun mapsTypeLabel(type: MapsInstructionType): String = when (type) {
     MapsInstructionType.ROUNDABOUT -> "rotonda"
     MapsInstructionType.ARRIVE -> "llegada"
     MapsInstructionType.OTHER -> "otra"
+}
+
+private fun depthModeLabel(mode: DepthGuidanceMode): String = when (mode) {
+    DepthGuidanceMode.MONOCULAR -> "monocular"
+    DepthGuidanceMode.LDAF_ONLY -> "LDAF"
+    DepthGuidanceMode.ARCORE_DEPTH -> "ARCore depth"
 }
 
 private fun perceptionLabel(source: PerceptionSource): String = when (source) {

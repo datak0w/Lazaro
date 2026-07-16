@@ -36,6 +36,10 @@ data class RouteMatchState(
     val heatmapMeanLeft: Float = 0f,
     val heatmapMeanRight: Float = 0f,
     val heatmapConfidence: Float = 0f,
+    val odmScore: Float = 0f,
+    val odmAlongM: Float = 0f,
+    val odmGradePct: Float = 0f,
+    val onOdmCorridor: Boolean = false,
 )
 
 object RouteCodec {

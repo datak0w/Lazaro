@@ -2,6 +2,8 @@ package io.lazaro.routes.replay
 
 import io.lazaro.routes.RouteRepository
 import io.lazaro.routes.entity.HeatmapCell
+import io.lazaro.routes.map.CorridorFusionEngine
+import io.lazaro.routes.map.OjenOdmBundle
 import io.lazaro.routes.model.CanonicalProfilePoint
 import io.lazaro.routes.model.RouteCodec
 import io.lazaro.routes.model.RouteMatchState
@@ -15,11 +17,12 @@ import kotlin.math.sqrt
 
 /**
  * Empareja GPS+corredor con el perfil canónico por **distancia-along** (celdas ~2 m),
- * no por índice de polyline cruda.
+ * enriquecido con snap ODM del corredor pueblo→casa cuando está disponible.
  */
 @Singleton
 class RouteMapMatcher @Inject constructor(
     private val routeRepository: RouteRepository,
+    private val ojenOdmBundle: OjenOdmBundle,
 ) {
     private var polyline: List<Pair<Double, Double>> = emptyList()
     private var profile: List<CanonicalProfilePoint> = emptyList()
@@ -28,12 +31,18 @@ class RouteMapMatcher @Inject constructor(
     private var routeId: Long = 0L
     private var profileIndex = 0
     private var lastConfidence = 0f
+    private var odmEnabled = false
 
     suspend fun loadRoute(routeId: Long) {
+        odmEnabled = ojenOdmBundle.ensureLoaded()
         val route = routeRepository.getRoute(routeId) ?: return
         this.routeId = routeId
         polyline = RouteCodec.decodePolyline(route.canonicalPolyline)
         profile = RouteCodec.decodeProfile(route.canonicalProfileJson)
+        if (profile.isEmpty() && odmEnabled) {
+            profile = seedProfileFromOdm()
+            polyline = profile.map { it.lat to it.lng }
+        }
         val heat = routeRepository.getHeatmap(routeId)
         heatmapByAlong = heat.sortedBy { it.distanceAlongM }
         heatmapByGrid = heat.associateBy { it.gridIndex }
@@ -49,6 +58,7 @@ class RouteMapMatcher @Inject constructor(
         heatmapByAlong = emptyList()
         profileIndex = 0
         lastConfidence = 0f
+        odmEnabled = false
     }
 
     fun isLoaded(): Boolean = routeId != 0L && profile.isNotEmpty()
@@ -74,13 +84,24 @@ class RouteMapMatcher @Inject constructor(
             )
         }
 
-        // Perfil canónico (pasos ~2 m) como referencia principal
-        val nearestProfile = findNearestProfileIndex(lat, lng)
+        val odmSnap = if (odmEnabled) ojenOdmBundle.snap(lat, lng, accuracyM) else null
+        val matchLat = odmSnap?.lat ?: lat
+        val matchLng = odmSnap?.lng ?: lng
+
+        val nearestProfile = if (odmSnap != null && profile.isNotEmpty()) {
+            findNearestProfileByAlong(odmSnap.distanceAlongM)
+        } else {
+            findNearestProfileIndex(matchLat, matchLng)
+        }
         profileIndex = nearestProfile
         val expected = profile[nearestProfile]
-        val distAlong = expected.distanceAlongM
+        val distAlong = if (odmSnap != null) odmSnap.distanceAlongM else expected.distanceAlongM
 
-        val lateralOffset = haversineM(lat, lng, expected.lat, expected.lng).toFloat()
+        val lateralOffset = if (odmSnap != null) {
+            odmSnap.lateralOffsetM
+        } else {
+            haversineM(matchLat, matchLng, expected.lat, expected.lng).toFloat()
+        }
 
         val corridorScore = run {
             val dl = abs(leftP - expected.leftP)
@@ -91,13 +112,28 @@ class RouteMapMatcher @Inject constructor(
 
         val heat = heatmapFor(nearestProfile, distAlong)
         val gpsScore = (1f - (accuracyM / 30f)).coerceIn(0f, 1f)
-        val heatConfidence = heat?.confidence ?: 0.5f
-        val confidence = (corridorScore * 0.45f + gpsScore * 0.2f + heatConfidence * 0.35f)
-            .coerceIn(0f, 1f)
+        val heatConfidence = heat?.confidence ?: 0f
+        val hasHeatmap = heat != null && heatConfidence > 0.05f
+
+        val odmScore = odmSnap?.odmScore ?: 0f
+        val confidence = CorridorFusionEngine.computeConfidence(
+            CorridorFusionEngine.FusionInput(
+                corridorScore = corridorScore,
+                gpsScore = gpsScore,
+                heatConfidence = if (hasHeatmap) heatConfidence else 0.5f,
+                odmScore = odmScore,
+                hasHeatmap = hasHeatmap,
+                onCorridor = odmSnap?.onCorridor == true,
+            ),
+        )
         lastConfidence = confidence
 
-        val polylineIdx = findNearestPolylineIndex(lat, lng)
-        val inReplay = confidence >= REPLAY_THRESHOLD && lateralOffset < MAX_LATERAL_M
+        val polylineIdx = findNearestPolylineIndex(matchLat, matchLng)
+        val replayThreshold = CorridorFusionEngine.replayThreshold(
+            odmScore = odmScore,
+            onCorridor = odmSnap?.onCorridor == true,
+        )
+        val inReplay = confidence >= replayThreshold && lateralOffset < MAX_LATERAL_M
 
         return RouteMatchState(
             routeId = routeId,
@@ -107,13 +143,20 @@ class RouteMapMatcher @Inject constructor(
             lateralOffsetM = lateralOffset,
             confidence = confidence,
             inReplaySegment = inReplay,
-            expectedPoint = expected,
+            expectedPoint = expected.copy(
+                yawDeg = odmSnap?.bearingDeg ?: expected.yawDeg,
+                segmentType = odmSnap?.segmentTag ?: expected.segmentType,
+            ),
             heatmapObstacleHits = heat?.obstacleHits ?: 0,
             heatmapVariance = heat?.lateralVariance ?: 0f,
             heatmapSafeSide = heat?.safeSide ?: expected.safeSide,
             heatmapMeanLeft = heat?.meanLeft ?: expected.leftP,
             heatmapMeanRight = heat?.meanRight ?: expected.rightP,
-            heatmapConfidence = heatConfidence,
+            heatmapConfidence = if (hasHeatmap) heatConfidence else 0f,
+            odmScore = odmScore,
+            odmAlongM = odmSnap?.distanceAlongM ?: 0f,
+            odmGradePct = odmSnap?.gradePct ?: 0f,
+            onOdmCorridor = odmSnap?.onCorridor == true,
         )
     }
 
@@ -125,6 +168,37 @@ class RouteMapMatcher @Inject constructor(
     }
 
     fun lastConfidence(): Float = lastConfidence
+
+    private fun seedProfileFromOdm(): List<CanonicalProfilePoint> {
+        return ojenOdmBundle.seedProfilePoints().map { p ->
+            CanonicalProfilePoint(
+                distanceAlongM = p.distanceAlongM,
+                leftP = 0f,
+                centerP = 0f,
+                rightP = 0f,
+                safeSide = "UNKNOWN",
+                roadSide = "UNKNOWN",
+                yawDeg = p.bearingDeg,
+                segmentType = p.segmentTag,
+                lat = p.lat,
+                lng = p.lng,
+            )
+        }
+    }
+
+    private fun findNearestProfileByAlong(alongM: Float): Int {
+        if (profile.isEmpty()) return 0
+        var best = 0
+        var bestDist = Float.MAX_VALUE
+        for (i in profile.indices) {
+            val d = abs(profile[i].distanceAlongM - alongM)
+            if (d < bestDist) {
+                bestDist = d
+                best = i
+            }
+        }
+        return best
+    }
 
     private fun heatmapFor(gridIndex: Int, alongM: Float): HeatmapCell? {
         heatmapByGrid[gridIndex]?.let { return it }

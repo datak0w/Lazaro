@@ -1,0 +1,20 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Ojen corredor pueblo-casa (plantilla)",
+    "note": "Reemplazar con eje digitalizado en QGIS tras procesar GoPro+ODM"
+  },
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [
+      [-4.85620, 36.56450],
+      [-4.85600, 36.56480],
+      [-4.85560, 36.56520],
+      [-4.85500, 36.56580],
+      [-4.85440, 36.56640],
+      [-4.85380, 36.56700],
+      [-4.85320, 36.56760],
+      [-4.85260, 36.56810]
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+[
+  {"lat": 36.56450, "lng": -4.85620, "alongM": 0,   "bearingDeg": 25,  "gradePct": 2,  "widthM": 2.0, "segmentTag": "urban_sidewalk"},
+  {"lat": 36.56480, "lng": -4.85600, "alongM": 40,  "bearingDeg": 30,  "gradePct": 3,  "widthM": 1.8, "segmentTag": "urban_sidewalk"},
+  {"lat": 36.56520, "lng": -4.85560, "alongM": 90,  "bearingDeg": 35,  "gradePct": 5,  "widthM": 2.2, "segmentTag": "rural_lane"},
+  {"lat": 36.56580, "lng": -4.85500, "alongM": 170, "bearingDeg": 40,  "gradePct": 8,  "widthM": 2.5, "segmentTag": "rural_lane"},
+  {"lat": 36.56640, "lng": -4.85440, "alongM": 260, "bearingDeg": 42,  "gradePct": 6,  "widthM": 2.8, "segmentTag": "rural_lane"},
+  {"lat": 36.56700, "lng": -4.85380, "alongM": 350, "bearingDeg": 38,  "gradePct": -4, "widthM": 2.5, "segmentTag": "wooded"},
+  {"lat": 36.56760, "lng": -4.85320, "alongM": 440, "bearingDeg": 35,  "gradePct": -2, "widthM": 2.2, "segmentTag": "wooded"},
+  {"lat": 36.56810, "lng": -4.85260, "alongM": 520, "bearingDeg": 30,  "gradePct": 0,  "widthM": 2.0, "segmentTag": "rural_lane"}
+]

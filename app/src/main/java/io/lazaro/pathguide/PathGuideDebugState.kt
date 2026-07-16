@@ -39,6 +39,12 @@ data class PathGuideDebugState(
     val lateralOffsetNorm: Float = 0f,
     val walkableConfidence: Float = 0f,
     val perceptionSource: PerceptionSource = PerceptionSource.MONOCULAR,
+    val depthGuidanceMode: DepthGuidanceMode = DepthGuidanceMode.MONOCULAR,
+    val deviceLabel: String = "",
     val frontalDistanceM: Float? = null,
+    val odmScore: Float? = null,
+    val odmAlongM: Float? = null,
+    val odmGradePct: Float? = null,
+    val onOdmCorridor: Boolean = false,
     val updatedAtMs: Long = System.currentTimeMillis(),
 )

@@ -7,6 +7,8 @@ import io.lazaro.pathguide.DoorwayVoiceCue
 import io.lazaro.pathguide.ExitBrainFrameResult
 import io.lazaro.pathguide.ExitBrainPhase
 import io.lazaro.pathguide.JunctionType
+import io.lazaro.routes.map.CorridorNodeType
+import io.lazaro.routes.map.OjenOdmBundle
 import io.lazaro.routes.model.RouteMatchState
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,6 +18,7 @@ import kotlin.math.max
 @Singleton
 class RouteReplayBrain @Inject constructor(
     private val routeMapMatcher: RouteMapMatcher,
+    private val ojenOdmBundle: OjenOdmBundle,
 ) {
     private val beepStabilizer = BeepSignalStabilizer()
     private var lastDriftCueMs = 0L
@@ -23,6 +26,8 @@ class RouteReplayBrain @Inject constructor(
     private var lastTurnCueMs = 0L
     private var lastSafeSideCueMs = 0L
     private var lastObstacleCueMs = 0L
+    private var lastGradeCueMs = 0L
+    private var lastNodeCueMs = 0L
     private var lastMatch: RouteMatchState? = null
 
     fun reset() {
@@ -32,6 +37,8 @@ class RouteReplayBrain @Inject constructor(
         lastTurnCueMs = 0L
         lastSafeSideCueMs = 0L
         lastObstacleCueMs = 0L
+        lastGradeCueMs = 0L
+        lastNodeCueMs = 0L
         lastMatch = null
         routeMapMatcher.reset()
     }
@@ -90,6 +97,51 @@ class RouteReplayBrain @Inject constructor(
         now: Long,
     ): DoorwayVoiceCue? {
         val expected = match.expectedPoint ?: return null
+
+        ojenOdmBundle.nodeAhead(match.odmAlongM.takeIf { it > 0f } ?: match.distanceAlongM)
+            ?.let { node ->
+                if (now - lastNodeCueMs >= NODE_DEBOUNCE_MS) {
+                    lastNodeCueMs = now
+                    val message = when (node.type) {
+                        CorridorNodeType.FORK ->
+                            "Bifurcación. ${node.label.ifBlank { "Sigue el camino principal." }}"
+                        CorridorNodeType.GATE ->
+                            "Verja. ${node.label.ifBlank { "Pasa por el centro." }}"
+                        CorridorNodeType.ROAD_CROSS ->
+                            "Cruce con calzada. ${node.label.ifBlank { "Precaución." }}"
+                        CorridorNodeType.DESTINATION ->
+                            node.label.ifBlank { "Llegando a casa." }
+                        CorridorNodeType.OTHER ->
+                            node.label.takeIf { it.isNotBlank() }
+                    }
+                    if (message != null) {
+                        return DoorwayVoiceCue(
+                            message = message,
+                            debounceMs = NODE_DEBOUNCE_MS,
+                            cueId = "odm_node_${node.type.name.lowercase()}",
+                        )
+                    }
+                }
+            }
+
+        val grade = match.odmGradePct
+        if (grade != 0f && now - lastGradeCueMs >= GRADE_DEBOUNCE_MS) {
+            val gradeMsg = when {
+                grade >= 12f -> "Subida fuerte. Ve despacio."
+                grade >= 5f -> "Subida suave. Sigue recto."
+                grade <= -12f -> "Bajada. Pie atrás."
+                grade <= -5f -> "Bajada suave."
+                else -> null
+            }
+            if (gradeMsg != null) {
+                lastGradeCueMs = now
+                return DoorwayVoiceCue(
+                    message = gradeMsg,
+                    debounceMs = GRADE_DEBOUNCE_MS,
+                    cueId = "odm_grade",
+                )
+            }
+        }
 
         // Obstáculo habitual del heatmap (aprendido en paseos previos)
         val ahead = routeMapMatcher.peekAheadObstacle(match.distanceAlongM)
@@ -220,5 +272,7 @@ class RouteReplayBrain @Inject constructor(
         private const val STRAIGHT_DEBOUNCE_MS = 12_000L
         private const val SAFE_SIDE_DEBOUNCE_MS = 25_000L
         private const val OBSTACLE_DEBOUNCE_MS = 18_000L
+        private const val GRADE_DEBOUNCE_MS = 20_000L
+        private const val NODE_DEBOUNCE_MS = 15_000L
     }
 }

@@ -1,0 +1,5 @@
+[
+  {"lat": 36.56520, "lng": -4.85560, "alongM": 90,  "type": "fork",        "label": "Bifurcación hacia el campo"},
+  {"lat": 36.56700, "lng": -4.85380, "alongM": 350, "type": "gate",        "label": "Verja del camino"},
+  {"lat": 36.56810, "lng": -4.85260, "alongM": 520, "type": "destination", "label": "Llegando a casa"}
+]
