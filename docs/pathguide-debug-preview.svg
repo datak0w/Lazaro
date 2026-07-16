@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Preview debug de navegación con pitidos</title>
+  <desc id="desc">Carretera en perspectiva con líneas guía y métricas superpuestas.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#10182a"/>
+      <stop offset="100%" stop-color="#1e2f4f"/>
+    </linearGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a3f4d"/>
+      <stop offset="100%" stop-color="#1f232d"/>
+    </linearGradient>
+    <linearGradient id="hud" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#49e3ff"/>
+      <stop offset="100%" stop-color="#5da0ff"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#5dd6ff" flood-opacity="0.8"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#sky)"/>
+  <rect y="460" width="1280" height="260" fill="#24354c"/>
+
+  <polygon points="585,250 695,250 1090,720 190,720" fill="url(#road)"/>
+
+  <g stroke="#8aa1c9" stroke-opacity="0.3" stroke-width="2">
+    <line x1="640" y1="260" x2="640" y2="720"/>
+    <line x1="620" y1="300" x2="560" y2="720"/>
+    <line x1="660" y1="300" x2="720" y2="720"/>
+    <line x1="600" y1="340" x2="470" y2="720"/>
+    <line x1="680" y1="340" x2="810" y2="720"/>
+  </g>
+
+  <g stroke="#ffd34d" stroke-width="5" stroke-linecap="round" stroke-dasharray="24 20" opacity="0.95">
+    <line x1="640" y1="270" x2="640" y2="710"/>
+  </g>
+
+  <polyline points="520,360 525,420 515,500 498,600 475,700"
+    fill="none" stroke="#22d3ee" stroke-width="6" filter="url(#glow)"/>
+  <polyline points="760,360 768,430 782,520 800,620 825,705"
+    fill="none" stroke="#22d3ee" stroke-width="6" filter="url(#glow)"/>
+
+  <polyline points="640,360 646,430 650,510 647,600 640,700"
+    fill="none" stroke="#34f59f" stroke-width="7" filter="url(#glow)"/>
+
+  <g fill="#0d1b2f" fill-opacity="0.82" stroke="url(#hud)" stroke-width="2">
+    <rect x="40" y="38" width="360" height="150" rx="12"/>
+    <rect x="880" y="38" width="360" height="185" rx="12"/>
+    <rect x="420" y="40" width="440" height="78" rx="12"/>
+    <rect x="945" y="560" width="290" height="126" rx="12"/>
+  </g>
+
+  <g font-family="Consolas, Menlo, monospace" fill="#b7f2ff">
+    <text x="58" y="75" font-size="24" font-weight="700">PathGuide DEBUG</text>
+    <text x="58" y="108" font-size="20">mode: MONOCULAR</text>
+    <text x="58" y="136" font-size="20">phase: SIDEWALK</text>
+    <text x="58" y="164" font-size="20">safeSide: RIGHT</text>
+
+    <text x="900" y="75" font-size="22" font-weight="700">Métricas en tiempo real</text>
+    <text x="900" y="107" font-size="19">offsetLateral: +0.34 m</text>
+    <text x="900" y="134" font-size="19">leftEdge: 1.21 m</text>
+    <text x="900" y="161" font-size="19">rightEdge: 0.86 m</text>
+    <text x="900" y="188" font-size="19">odmScore: 0.82</text>
+    <text x="900" y="215" font-size="19">onOdmCorridor: true</text>
+
+    <text x="448" y="88" font-size="28" font-weight="700" fill="#d7ffea">GUIADO ACTIVO</text>
+
+    <text x="964" y="598" font-size="20">L beep: 0.22</text>
+    <text x="964" y="627" font-size="20">R beep: 0.67</text>
+    <text x="964" y="656" font-size="20">alert: false</text>
+  </g>
+
+  <g fill="#8bf7c5" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700">
+    <text x="434" y="350">Borde izquierdo</text>
+    <text x="710" y="350">Borde derecho</text>
+  </g>
+</svg>

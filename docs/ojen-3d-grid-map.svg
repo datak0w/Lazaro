@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Mapa 3D de Ojén con cuadrícula y corredor peatonal</title>
+  <desc id="desc">Ilustración isométrica de un mapa con grid 3D y ruta destacada.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#eef4ff"/>
+      <stop offset="100%" stop-color="#dbe9ff"/>
+    </linearGradient>
+    <linearGradient id="terrain" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f8fbff"/>
+      <stop offset="100%" stop-color="#ecf3ff"/>
+    </linearGradient>
+    <linearGradient id="gridGlow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7cd7ff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#5d8dff" stop-opacity="0.8"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#31548f" flood-opacity="0.2"/>
+    </filter>
+    <filter id="pathGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#ffca3a" flood-opacity="0.8"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#bg)"/>
+
+  <polygon points="130,140 1140,100 1080,595 185,640" fill="url(#terrain)" filter="url(#softShadow)"/>
+
+  <g stroke="url(#gridGlow)" stroke-width="1.6" opacity="0.62">
+    <path d="M180 185 L1110 150"/>
+    <path d="M170 235 L1104 200"/>
+    <path d="M162 285 L1098 250"/>
+    <path d="M155 335 L1092 300"/>
+    <path d="M148 385 L1086 350"/>
+    <path d="M142 435 L1080 400"/>
+    <path d="M136 485 L1074 450"/>
+    <path d="M130 535 L1068 500"/>
+    <path d="M124 585 L1062 550"/>
+
+    <path d="M245 126 L190 625"/>
+    <path d="M335 122 L278 620"/>
+    <path d="M425 118 L366 615"/>
+    <path d="M515 114 L455 610"/>
+    <path d="M605 110 L544 605"/>
+    <path d="M695 106 L633 600"/>
+    <path d="M785 102 L722 595"/>
+    <path d="M875 98 L811 590"/>
+    <path d="M965 94 L900 585"/>
+    <path d="M1055 90 L989 580"/>
+  </g>
+
+  <g fill="#f2f7ff" stroke="#b6c8e8" stroke-width="2" opacity="0.98">
+    <path d="M250 250 L420 242 L455 273 L290 282 Z"/>
+    <path d="M470 235 L655 228 L688 260 L500 267 Z"/>
+    <path d="M700 222 L860 216 L892 246 L730 254 Z"/>
+    <path d="M300 330 L520 320 L558 355 L335 366 Z"/>
+    <path d="M570 315 L790 306 L828 340 L603 351 Z"/>
+    <path d="M260 430 L470 421 L505 455 L292 465 Z"/>
+    <path d="M530 415 L740 406 L776 440 L562 450 Z"/>
+  </g>
+
+  <polyline
+    points="260,515 355,470 470,425 600,370 735,325 830,285 915,248"
+    fill="none"
+    stroke="#ffb703"
+    stroke-width="10"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    filter="url(#pathGlow)"
+  />
+  <polyline
+    points="260,515 355,470 470,425 600,370 735,325 830,285 915,248"
+    fill="none"
+    stroke="#ffd166"
+    stroke-width="4.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <g>
+    <circle cx="470" cy="425" r="13" fill="#1d4ed8"/>
+    <circle cx="600" cy="370" r="13" fill="#2563eb"/>
+    <circle cx="735" cy="325" r="13" fill="#0ea5e9"/>
+    <circle cx="830" cy="285" r="13" fill="#3b82f6"/>
+    <circle cx="915" cy="248" r="13" fill="#22d3ee"/>
+  </g>
+
+  <g font-family="Segoe UI, Arial, sans-serif" font-weight="700" font-size="24" fill="#0f2f67">
+    <text x="206" y="548">Pueblo</text>
+    <text x="944" y="254">Casa</text>
+  </g>
+
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="#1a4e96" opacity="0.9">
+    <text x="505" y="404">fork</text>
+    <text x="630" y="352">gate</text>
+    <text x="760" y="305">road_cross</text>
+  </g>
+</svg>
