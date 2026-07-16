@@ -1,6 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
-  <title id="title">Mapa 3D de Ojén con cuadrícula y corredor peatonal</title>
-  <desc id="desc">Ilustración isométrica de un mapa con grid 3D y ruta destacada.</desc>
+  <title id="title">Mapa 3D de Ojen con cuadricula y corredor peatonal</title>
+  <desc id="desc">Ilustracion isometrica de un mapa con grid 3D y ruta destacada.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#eef4ff"/>
@@ -36,7 +37,6 @@
     <path d="M136 485 L1074 450"/>
     <path d="M130 535 L1068 500"/>
     <path d="M124 585 L1062 550"/>
-
     <path d="M245 126 L190 625"/>
     <path d="M335 122 L278 620"/>
     <path d="M425 118 L366 615"/>
@@ -59,23 +59,8 @@
     <path d="M530 415 L740 406 L776 440 L562 450 Z"/>
   </g>
 
-  <polyline
-    points="260,515 355,470 470,425 600,370 735,325 830,285 915,248"
-    fill="none"
-    stroke="#ffb703"
-    stroke-width="10"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    filter="url(#pathGlow)"
-  />
-  <polyline
-    points="260,515 355,470 470,425 600,370 735,325 830,285 915,248"
-    fill="none"
-    stroke="#ffd166"
-    stroke-width="4.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
+  <polyline points="260,515 355,470 470,425 600,370 735,325 830,285 915,248" fill="none" stroke="#ffb703" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" filter="url(#pathGlow)"/>
+  <polyline points="260,515 355,470 470,425 600,370 735,325 830,285 915,248" fill="none" stroke="#ffd166" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
 
   <g>
     <circle cx="470" cy="425" r="13" fill="#1d4ed8"/>

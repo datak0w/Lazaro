@@ -345,7 +345,7 @@ La cámara trasera analiza el espacio y emite **pitidos** más fuertes hacia don
 ## 🗺️ Mapeo de Ojén (GoPro 11 + GPS + 3D)
 
 <p align="center">
-  <img src="docs/ojen-3d-grid-map.svg" alt="Mapa 3D de Ojén con cuadrícula y corredor peatonal resaltado" width="880">
+  <img src="docs/ojen-3d-grid-map.png" alt="Mapa 3D de Ojén con cuadrícula y corredor peatonal resaltado" width="880">
 </p>
 
 ### Cartografiar el pueblo a pie para hacerlo más accesible
@@ -446,7 +446,7 @@ Iteración rápida: añadir `--fast-orthophoto` para preview; luego pasada final
 Lazaro AI guía el **centrado lateral** en la acera con pitidos estéreo. La lógica corre **en el móvil**, sin nube.
 
 <p align="center">
-  <img src="docs/pathguide-debug-preview.svg" alt="Preview tipo debug de navegación con pitidos: carretera, líneas guía y métricas superpuestas" width="900">
+  <img src="docs/pathguide-debug-preview.png" alt="Preview tipo debug de navegación con pitidos: carretera, líneas guía y métricas superpuestas" width="900">
 </p>
 
 Preview visual (estilo DEBUG): carretera en perspectiva, líneas de borde/corredor y telemetría (`offset`, `odmScore`, `safeSide`, intensidad L/R).
