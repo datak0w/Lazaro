@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Desarrolladores — Manual Lazaro AI</title>
+  <link rel="stylesheet" href="assets/manual.css">
+</head>
+<body>
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <header class="site-header">
+    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
+    <nav class="nav" aria-label="Secciones del manual">
+      <a href="index.html">Inicio</a>
+      <a href="primeros-pasos.html">Primeros pasos</a>
+      <a href="instalacion.html">Instalación</a>
+      <a href="permisos.html">Permisos</a>
+      <a href="comandos.html">Comandos</a>
+      <a href="navegacion.html">Navegación</a>
+      <a href="memoria-ia.html">Memoria e IA</a>
+      <a href="configuracion.html">Configuración</a>
+      <a href="mapeo.html">Mapeo Ojén</a>
+      <a href="desarrolladores.html" aria-current="page">Desarrolladores</a>
+    </nav>
+  </header>
+  <main id="contenido" class="wrap">
+    <h1>Para desarrolladores</h1>
+    <p class="lead">Compilar, probar y contribuir al proyecto open source.</p>
+
+    <h2>Requisitos</h2>
+    <ul>
+      <li>Android SDK, API 26+</li>
+      <li>JDK 17</li>
+      <li>Clave Gemini en <code>local.properties</code> (opcional, no subir a Git)</li>
+    </ul>
+
+    <h2>Compilar e instalar</h2>
+<pre><code>git clone https://github.com/datak0w/Lazaro.git
+cd Lazaro
+./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk</code></pre>
+
+    <h2>Tests</h2>
+<pre><code>./gradlew testDebugUnitTest</code></pre>
+
+    <h2>Arquitectura (resumen)</h2>
+<pre><code>AssistantForegroundService
+        ↓
+AssistantController  ←→  Speech / TTS / Wake word (Vosk)
+        ↓
+GeminiOrchestrator → ActionExecutor
+        ↓                    ↓
+   Memoria / IA      Navegación, media, rutas…
+                           ↓
+              NavigationGuidanceMonitor ← Maps
+              PathGuideController ← Cámara + pitidos
+              ActiveSessionTracker ← pausa/reanudar chat</code></pre>
+
+    <p>
+      <strong>Stack:</strong> Kotlin · Jetpack Compose · Hilt · Room · Gemini · Vosk ·
+      ML Kit · CameraX · ARCore · OpenStreetMap · GeoJSON
+    </p>
+
+    <h2>Contribuir</h2>
+    <ul>
+      <li>Pruebas con usuarios ciegos o con baja visión</li>
+      <li>Variantes del español</li>
+      <li>Navegación, mapeo 3D y mapas offline</li>
+      <li>Documentación y este manual</li>
+    </ul>
+    <ol>
+      <li>Fork del repositorio</li>
+      <li>Rama: <code>git checkout -b mejora/mi-aporte</code></li>
+      <li>Prueba en móvil real si puedes</li>
+      <li>Abre un Pull Request</li>
+    </ol>
+
+    <h2>Licencia</h2>
+    <p>Apache License 2.0 — ver <a href="https://github.com/datak0w/Lazaro/blob/main/LICENSE">LICENSE</a>.</p>
+
+    <p>
+      Más detalle técnico y bibliografía en el
+      <a href="https://github.com/datak0w/Lazaro/blob/main/README.md">README</a>.
+    </p>
+  </main>
+  <footer class="site-footer">
+    <p><a href="index.html">← Volver al índice</a> · <a href="https://github.com/datak0w/Lazaro">GitHub</a></p>
+  </footer>
+</body>
+</html>

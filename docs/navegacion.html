@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Navegación — Manual Lazaro AI</title>
+  <link rel="stylesheet" href="assets/manual.css">
+</head>
+<body>
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <header class="site-header">
+    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
+    <nav class="nav" aria-label="Secciones del manual">
+      <a href="index.html">Inicio</a>
+      <a href="primeros-pasos.html">Primeros pasos</a>
+      <a href="instalacion.html">Instalación</a>
+      <a href="permisos.html">Permisos</a>
+      <a href="comandos.html">Comandos</a>
+      <a href="navegacion.html" aria-current="page">Navegación</a>
+      <a href="memoria-ia.html">Memoria e IA</a>
+      <a href="configuracion.html">Configuración</a>
+      <a href="mapeo.html">Mapeo Ojén</a>
+      <a href="desarrolladores.html">Desarrolladores</a>
+    </nav>
+  </header>
+  <main id="contenido" class="wrap">
+    <h1>Navegación y guía por pitidos</h1>
+    <p class="lead">Lazaro no sustituye Google Maps: lo complementa para personas ciegas.</p>
+
+    <h2>Navegación con Maps</h2>
+    <ol>
+      <li>Confirmas el destino por voz.</li>
+      <li>Se abre Google Maps en modo peatonal.</li>
+      <li>Lazaro lee cada giro: <em>«Ahora, gira a la derecha…»</em></li>
+      <li>En cada giro, el móvil vibra distinto según el lado.</li>
+    </ol>
+
+    <table>
+      <thead><tr><th>Maniobra</th><th>Vibración</th></tr></thead>
+      <tbody>
+        <tr><td>Izquierda</td><td>Dos pulsos cortos</td></tr>
+        <tr><td>Derecha</td><td>Un pulso medio</td></tr>
+        <tr><td>Retorno</td><td>Tres pulsos</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      Necesitas: Maps instalado, <strong>acceso a notificaciones</strong> para Lazaro, volumen audible.
+    </div>
+
+    <h2>Chat durante la navegación</h2>
+    <p>
+      Mientras navegas, di <strong>«Lazaro»</strong> y pide otra cosa (hora, WhatsApp, dónde estoy…).
+      La guía de Maps se pausa en voz (los pitidos de acera pueden seguir).
+      Al terminar, Lazaro pregunta: <em>«¿Seguimos hacia [destino]?»</em>
+    </p>
+    <ul>
+      <li><strong>Sí</strong> → reanuda la navegación</li>
+      <li><strong>No</strong> / <strong>«Para»</strong> → cancela la sesión</li>
+    </ul>
+
+    <h2>Rutas grabadas</h2>
+    <ol>
+      <li>Graba el trayecto caminando (<em>«graba ruta a casa»</em>).</li>
+      <li>Lazaro guarda el perfil espacial (lado seguro, giros, distancias).</li>
+      <li>La próxima vez, ofrece la ruta guardada; Maps lleva el tramo urbano y Lazaro la guía fina.</li>
+    </ol>
+    <p class="quote">Cada nueva grabación mejora la ruta, como un mapa dibujado entre varios paseos.</p>
+
+    <h2>Modo paseo</h2>
+    <p>
+      Sin Maps: la cámara analiza el espacio y emite pitidos más fuertes hacia donde hay más sitio libre.
+      También avisa de obstáculos con frases cortas.
+    </p>
+
+    <h2>Cómo interpretar los pitidos</h2>
+    <p>
+      <img src="pathguide-debug-preview.png" alt="Vista tipo debug: carretera, líneas guía y métricas" width="880" style="max-width:100%;height:auto;border-radius:8px">
+    </p>
+    <table>
+      <thead><tr><th>Señal</th><th>Significado</th></tr></thead>
+      <tbody>
+        <tr><td>Silencio</td><td>Vas bien centrado</td></tr>
+        <tr><td>Pitido izquierdo</td><td>Desvíate un poco a la <strong>derecha</strong></td></tr>
+        <tr><td>Pitido derecho</td><td>Desvíate un poco a la <strong>izquierda</strong></td></tr>
+        <tr><td>Ambos lados</td><td>Paso estrecho: sigue recto con cuidado</td></tr>
+        <tr><td>Tono continuo</td><td>Te acercas a la calzada — vuelve a la fachada</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Sitios favoritos</h2>
+    <ol>
+      <li>En la farmacia: <em>«Guarda sitio farmacia»</em> → sí</li>
+      <li>Otro día: <em>«Llévame a farmacia»</em> → Maps al punto exacto</li>
+    </ol>
+  </main>
+  <footer class="site-footer">
+    <p><a href="index.html">← Volver al índice</a></p>
+  </footer>
+</body>
+</html>

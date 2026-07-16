@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Permisos — Manual Lazaro AI</title>
+  <link rel="stylesheet" href="assets/manual.css">
+</head>
+<body>
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <header class="site-header">
+    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
+    <nav class="nav" aria-label="Secciones del manual">
+      <a href="index.html">Inicio</a>
+      <a href="primeros-pasos.html">Primeros pasos</a>
+      <a href="instalacion.html">Instalación</a>
+      <a href="permisos.html" aria-current="page">Permisos</a>
+      <a href="comandos.html">Comandos</a>
+      <a href="navegacion.html">Navegación</a>
+      <a href="memoria-ia.html">Memoria e IA</a>
+      <a href="configuracion.html">Configuración</a>
+      <a href="mapeo.html">Mapeo Ojén</a>
+      <a href="desarrolladores.html">Desarrolladores</a>
+    </nav>
+  </header>
+  <main id="contenido" class="wrap">
+    <h1>Permisos necesarios</h1>
+    <p class="lead">Sin estos permisos, Lazaro no puede escucharte ni guiarte con seguridad.</p>
+
+    <table>
+      <thead><tr><th>Permiso</th><th>Para qué</th><th>Obligatorio</th></tr></thead>
+      <tbody>
+        <tr><td>Micrófono</td><td>Escucharte y detectar «Lazaro»</td><td>Sí</td></tr>
+        <tr><td>Ubicación</td><td>Navegar, sitios, rutas, «dónde estoy»</td><td>Sí (movilidad)</td></tr>
+        <tr><td>Notificaciones</td><td>Servicio en segundo plano estable</td><td>Sí</td></tr>
+        <tr><td>Acceso a notificaciones</td><td>Leer giros de Google Maps y WhatsApp</td><td>Sí (Maps/WhatsApp)</td></tr>
+        <tr><td>Contactos / teléfono</td><td>Llamadas por nombre</td><td>Si usas llamadas</td></tr>
+        <tr><td>Vibración</td><td>Giros en navegación</td><td>Recomendado</td></tr>
+        <tr><td>Cámara</td><td>Paseo, rutas grabadas, tickets</td><td>Si usas cámara</td></tr>
+        <tr><td>Accesibilidad</td><td>Confirmar envío en WhatsApp</td><td>Opcional</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Cómo activar el acceso a notificaciones</h2>
+    <ol>
+      <li>Ajustes del sistema → Aplicaciones → Acceso especial → <strong>Acceso a notificaciones</strong>.</li>
+      <li>Activa <strong>Lazaro AI</strong>.</li>
+      <li>Sin esto, no oirás los giros de Maps ni podrá leer WhatsApp.</li>
+    </ol>
+
+    <div class="warn">
+      <strong>Importante:</strong> el acceso a notificaciones es sensible.
+      Lazaro lo usa solo para Maps y mensajería; el código es auditable en GitHub.
+    </div>
+  </main>
+  <footer class="site-footer">
+    <p><a href="index.html">← Volver al índice</a></p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configuración — Manual Lazaro AI</title>
+  <link rel="stylesheet" href="assets/manual.css">
+</head>
+<body>
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <header class="site-header">
+    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
+    <nav class="nav" aria-label="Secciones del manual">
+      <a href="index.html">Inicio</a>
+      <a href="primeros-pasos.html">Primeros pasos</a>
+      <a href="instalacion.html">Instalación</a>
+      <a href="permisos.html">Permisos</a>
+      <a href="comandos.html">Comandos</a>
+      <a href="navegacion.html">Navegación</a>
+      <a href="memoria-ia.html">Memoria e IA</a>
+      <a href="configuracion.html" aria-current="page">Configuración</a>
+      <a href="mapeo.html">Mapeo Ojén</a>
+      <a href="desarrolladores.html">Desarrolladores</a>
+    </nav>
+  </header>
+  <main id="contenido" class="wrap">
+    <h1>Configuración</h1>
+    <p class="lead">Ajustes al compilar la app y consejos de uso diario.</p>
+
+    <h2>Clave Gemini (opcional)</h2>
+    <p>
+      Para el diálogo libre y la memoria inteligente, añade una clave gratuita de
+      <a href="https://aistudio.google.com/">Google AI Studio</a> al compilar:
+    </p>
+<pre><code>cp local.properties.example local.properties</code></pre>
+<pre><code>GEMINI_API_KEY=tu_clave_aqui
+GEMINI_MODEL=gemini-3.5-flash</code></pre>
+    <div class="warn">
+      <strong>No subas</strong> <code>local.properties</code> ni claves a Git.
+    </div>
+    <p>
+      Puedes cambiar el modelo Gemini con <code>GEMINI_MODEL</code> (por ejemplo otro Flash)
+      y recompilar. Otros proveedores (OpenAI, etc.) no están soportados aún.
+    </p>
+
+    <h2>Hardware recomendado</h2>
+    <table>
+      <thead><tr><th>Dispositivo</th><th>Rol</th><th>Capacidades</th></tr></thead>
+      <tbody>
+        <tr><td>Samsung Galaxy A34</td><td>Desarrollo / pruebas</td><td>Cámara + IMU (pipeline monocular)</td></tr>
+        <tr><td>Google Pixel 9</td><td>Cliente final</td><td>LDAF + ARCore Depth</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Pantalla DEBUG (PathGuide)</h2>
+    <p>
+      En ajustes de PathGuide puedes ver offset lateral, bordes, intensidad L/R,
+      fuente de percepción y métricas ODM (<code>odmScore</code>, pendiente, etc.).
+    </p>
+
+    <h2>Consejos de uso diario</h2>
+    <ul>
+      <li>Volumen de medios audible (TTS y pitidos).</li>
+      <li>Auricular o altavoz libre; evita cubrir el micrófono.</li>
+      <li>GPS al aire libre para snap de rutas y sitios.</li>
+      <li>Di «para» si quieres callar o cortar una sesión.</li>
+      <li>Confirma siempre antes de navegar o llamar.</li>
+    </ul>
+
+    <h2>Bundle ODM offline (avanzado)</h2>
+    <p>
+      Tras mapear con GoPro, copia los JSON a
+      <code>files/maps/ojen_odm/</code> en el móvil (o assets al compilar).
+      Detalle en <a href="mapeo.html">Mapeo de Ojén</a>.
+    </p>
+  </main>
+  <footer class="site-footer">
+    <p><a href="index.html">← Volver al índice</a></p>
+  </footer>
+</body>
+</html>

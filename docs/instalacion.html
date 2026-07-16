@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Instalación — Manual Lazaro AI</title>
+  <link rel="stylesheet" href="assets/manual.css">
+</head>
+<body>
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <header class="site-header">
+    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
+    <nav class="nav" aria-label="Secciones del manual">
+      <a href="index.html">Inicio</a>
+      <a href="primeros-pasos.html">Primeros pasos</a>
+      <a href="instalacion.html" aria-current="page">Instalación</a>
+      <a href="permisos.html">Permisos</a>
+      <a href="comandos.html">Comandos</a>
+      <a href="navegacion.html">Navegación</a>
+      <a href="memoria-ia.html">Memoria e IA</a>
+      <a href="configuracion.html">Configuración</a>
+      <a href="mapeo.html">Mapeo Ojén</a>
+      <a href="desarrolladores.html">Desarrolladores</a>
+    </nav>
+  </header>
+  <main id="contenido" class="wrap">
+    <h1>Instalación</h1>
+    <p class="lead">Lazaro AI es una app Android. No está (aún) en Play Store: se instala desde APK.</p>
+
+    <h2>Requisitos</h2>
+    <ul>
+      <li>Android 8 (API 26) o superior</li>
+      <li>Micrófono y altavoz (o auriculares)</li>
+      <li>Google Maps instalado (para navegación urbana)</li>
+      <li>Opcional: Pixel 9 para profundidad ARCore; Samsung A34 sirve para desarrollo monocular</li>
+    </ul>
+
+    <h2>Instalar el APK</h2>
+    <ol>
+      <li>Consigue el APK (compílalo o pídelo a quien mantiene el proyecto).</li>
+      <li>En el móvil, permite <strong>instalar apps de orígenes desconocidos</strong> para el explorador o gestor de archivos que uses.</li>
+      <li>Abre el APK e instálalo.</li>
+      <li>Abre <strong>Lazaro AI</strong> → <strong>Iniciar asistente</strong>.</li>
+      <li>Concede los <a href="permisos.html">permisos</a> que pida.</li>
+    </ol>
+
+    <h2>Instalar desde el PC (desarrolladores)</h2>
+<pre><code>git clone https://github.com/datak0w/Lazaro.git
+cd Lazaro
+./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk</code></pre>
+
+    <div class="note">
+      La clave de Gemini (opcional) se configura en <code>local.properties</code> al compilar.
+      Ver <a href="configuracion.html">Configuración</a>.
+    </div>
+
+    <h2>Después de instalar</h2>
+    <ul class="checklist">
+      <li>Iniciar asistente y probar «Lazaro, qué hora es»</li>
+      <li>Activar acceso a notificaciones (Maps + WhatsApp)</li>
+      <li>Probar «dónde estoy» con GPS al aire libre</li>
+      <li>Instalar Google Maps si quieres giros hablados</li>
+    </ul>
+  </main>
+  <footer class="site-footer">
+    <p><a href="index.html">← Volver al índice</a></p>
+  </footer>
+</body>
+</html>

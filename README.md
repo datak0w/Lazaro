@@ -17,6 +17,16 @@
   🌍 <strong>Open Source</strong> &nbsp;·&nbsp; 🇪🇸 <strong>Español</strong> &nbsp;·&nbsp; 🏔️ <strong>Nacido en Ojén, Andalucía</strong> &nbsp;·&nbsp; 🤝 <strong>Apache 2.0</strong>
 </p>
 
+<p align="center">
+  📖 <strong><a href="https://datak0w.github.io/Lazaro/">Manual de instrucciones (GitHub Pages)</a></strong>
+  &nbsp;·&nbsp;
+  <a href="https://datak0w.github.io/Lazaro/comandos.html">Comandos</a>
+  &nbsp;·&nbsp;
+  <a href="https://datak0w.github.io/Lazaro/navegacion.html">Navegación</a>
+  &nbsp;·&nbsp;
+  <a href="https://datak0w.github.io/Lazaro/instalacion.html">Instalación</a>
+</p>
+
 ---
 
 ## 🎨 ¿Qué es Lazaro AI?
@@ -66,6 +76,7 @@ Lazaro AI usa **Google Gemini** de forma **responsable y acotada**:
 
 ## 📋 Tabla de contenidos
 
+- **[📖 Manual completo (GitHub Pages)](https://datak0w.github.io/Lazaro/)** — instalación, comandos, navegación, configuración, mapeo…
 - [Primeros pasos (sin tecnicismos)](#-primeros-pasos-sin-tecnicismos)
 - [Todas las funciones](#-todas-las-funciones)
 - [Comandos de voz completos](#-comandos-de-voz-completos)
@@ -502,6 +513,8 @@ Consulta con *«mis sitios guardados»* o borra con *«borra sitio farmacia»*.
 ---
 
 ## 📲 Instalación
+
+> Guía detallada: **[Manual → Instalación](https://datak0w.github.io/Lazaro/instalacion.html)**
 
 ### Usuarios (APK)
 

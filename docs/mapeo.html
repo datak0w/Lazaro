@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mapeo de Ojén — Manual Lazaro AI</title>
+  <link rel="stylesheet" href="assets/manual.css">
+</head>
+<body>
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <header class="site-header">
+    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
+    <nav class="nav" aria-label="Secciones del manual">
+      <a href="index.html">Inicio</a>
+      <a href="primeros-pasos.html">Primeros pasos</a>
+      <a href="instalacion.html">Instalación</a>
+      <a href="permisos.html">Permisos</a>
+      <a href="comandos.html">Comandos</a>
+      <a href="navegacion.html">Navegación</a>
+      <a href="memoria-ia.html">Memoria e IA</a>
+      <a href="configuracion.html">Configuración</a>
+      <a href="mapeo.html" aria-current="page">Mapeo Ojén</a>
+      <a href="desarrolladores.html">Desarrolladores</a>
+    </nav>
+  </header>
+  <main id="contenido" class="wrap">
+    <h1>Mapeo de Ojén (GoPro + 3D)</h1>
+    <p class="lead">
+      Cartografiamos el pueblo a pie para hacerlo más accesible: aceras, pendientes, verjas y bifurcaciones,
+      en un mapa offline en el móvil.
+    </p>
+
+    <p>
+      <img src="ojen-3d-grid-map.png" alt="Ilustración de mapa 3D con corredor pueblo a casa" width="880" style="max-width:100%;height:auto;border-radius:8px">
+    </p>
+
+    <h2>Cómo se captura</h2>
+    <ol>
+      <li>Paseamos con <strong>GoPro 11</strong> en timelapse, GPS activo, cámara hacia abajo (pértiga 2 m).</li>
+      <li>Cada foto lleva coordenadas GPS.</li>
+      <li><strong>OpenDroneMap</strong> reconstruye en 3D (ortofoto, DTM, nube de puntos).</li>
+      <li>En <strong>QGIS</strong> se digitaliza el eje, pendiente, ancho y nodos.</li>
+      <li>Se exporta un bundle offline (GeoJSON + JSON) al móvil.</li>
+    </ol>
+
+    <p>
+      <a href="gopro-captura-checklist.pdf"><strong>Descargar checklist de captura (PDF)</strong></a>
+      — imprimir y marcar en el campo.
+    </p>
+
+    <h2>Tres capas en el móvil</h2>
+    <table>
+      <thead><tr><th>Capa</th><th>Origen</th><th>Aporta</th></tr></thead>
+      <tbody>
+        <tr><td>OSM</td><td>Overpass → caché</td><td>Clasificar urbano / campo / arbolado</td></tr>
+        <tr><td>Rutas + heatmap</td><td>Paseos con cámara</td><td>Perfil lateral aprendido</td></tr>
+        <tr><td>Corredor ODM</td><td>GoPro + ODM + QGIS</td><td>Eje, pendiente, ancho, nodos</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Archivos del bundle</h2>
+    <p>Copiar a <code>files/maps/ojen_odm/</code> o incluir en assets:</p>
+    <ul>
+      <li><code>corridor_path.geojson</code> — eje del corredor</li>
+      <li><code>corridor_profile.json</code> — alongM, bearing, gradePct, widthM, segmentTag</li>
+      <li><code>corridor_nodes.json</code> — fork, gate, road_cross, destination</li>
+    </ul>
+
+    <h2>Comando ODM sugerido</h2>
+<pre><code>docker run -ti --rm -v /ruta/proyecto:/datasets/code opendronemap/odm \
+  --project-path /datasets --dtm --dem-resolution 5 --orthophoto-resolution 2</code></pre>
+  </main>
+  <footer class="site-footer">
+    <p><a href="index.html">← Volver al índice</a></p>
+  </footer>
+</body>
+</html>
