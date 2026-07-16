@@ -3,33 +3,54 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Desarrolladores. Manual accesible de Lazaro AI.">
   <title>Desarrolladores — Manual Lazaro AI</title>
   <link rel="stylesheet" href="assets/manual.css">
 </head>
 <body>
-  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <div class="skip-group">
+    <a href="#contenido">Saltar al contenido principal</a>
+    <a href="#nav-principal">Saltar al menú de secciones</a>
+    <a href="#pie">Saltar al pie de página</a>
+  </div>
+
   <header class="site-header">
-    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
-    <nav class="nav" aria-label="Secciones del manual">
-      <a href="index.html">Inicio</a>
-      <a href="primeros-pasos.html">Primeros pasos</a>
-      <a href="instalacion.html">Instalación</a>
-      <a href="permisos.html">Permisos</a>
-      <a href="comandos.html">Comandos</a>
-      <a href="navegacion.html">Navegación</a>
-      <a href="memoria-ia.html">Memoria e IA</a>
-      <a href="configuracion.html">Configuración</a>
-      <a href="mapeo.html">Mapeo Ojén</a>
-      <a href="desarrolladores.html" aria-current="page">Desarrolladores</a>
+    <div class="brand">
+      <p class="site-title"><a href="index.html">Lazaro AI</a></p>
+      <p>Manual de instrucciones accesible</p>
+    </div>
+    <nav id="nav-principal" class="nav" aria-labelledby="nav-titulo">
+      <h2 id="nav-titulo">Secciones del manual</h2>
+      <ul>
+        <li><a href="index.html">Inicio</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad de este manual</a></li>
+        <li><a href="primeros-pasos.html">Primeros pasos</a></li>
+        <li><a href="instalacion.html">Instalación</a></li>
+        <li><a href="permisos.html">Permisos</a></li>
+        <li><a href="comandos.html">Comandos de voz</a></li>
+        <li><a href="navegacion.html">Navegación</a></li>
+        <li><a href="memoria-ia.html">Memoria e IA</a></li>
+        <li><a href="configuracion.html">Configuración</a></li>
+        <li><a href="mapeo.html">Mapeo de Ojén</a></li>
+        <li><a href="desarrolladores.html" aria-current="page">Desarrolladores</a></li>
+      </ul>
     </nav>
   </header>
-  <main id="contenido" class="wrap">
+
+  <nav class="breadcrumb" aria-label="Miga de pan">
+    <ol>
+      <li><a href="index.html">Inicio</a></li>
+      <li aria-current="page">Desarrolladores</li>
+    </ol>
+  </nav>
+
+  <main id="contenido" class="wrap" tabindex="-1">
     <h1>Para desarrolladores</h1>
     <p class="lead">Compilar, probar y contribuir al proyecto open source.</p>
 
     <h2>Requisitos</h2>
     <ul>
-      <li>Android SDK, API 26+</li>
+      <li>Android SDK, API 26 o superior</li>
       <li>JDK 17</li>
       <li>Clave Gemini en <code>local.properties</code> (opcional, no subir a Git)</li>
     </ul>
@@ -57,8 +78,8 @@ GeminiOrchestrator → ActionExecutor
               ActiveSessionTracker ← pausa/reanudar chat</code></pre>
 
     <p>
-      <strong>Stack:</strong> Kotlin · Jetpack Compose · Hilt · Room · Gemini · Vosk ·
-      ML Kit · CameraX · ARCore · OpenStreetMap · GeoJSON
+      Stack: Kotlin, Jetpack Compose, Hilt, Room, Gemini, Vosk,
+      ML Kit, CameraX, ARCore, OpenStreetMap, GeoJSON.
     </p>
 
     <h2>Contribuir</h2>
@@ -69,22 +90,30 @@ GeminiOrchestrator → ActionExecutor
       <li>Documentación y este manual</li>
     </ul>
     <ol>
-      <li>Fork del repositorio</li>
-      <li>Rama: <code>git checkout -b mejora/mi-aporte</code></li>
+      <li>Haz un fork del repositorio</li>
+      <li>Crea una rama: <code>git checkout -b mejora/mi-aporte</code></li>
       <li>Prueba en móvil real si puedes</li>
       <li>Abre un Pull Request</li>
     </ol>
 
     <h2>Licencia</h2>
-    <p>Apache License 2.0 — ver <a href="https://github.com/datak0w/Lazaro/blob/main/LICENSE">LICENSE</a>.</p>
-
+    <p>Apache License 2.0 — ver <a href="https://github.com/datak0w/Lazaro/blob/main/LICENSE">archivo LICENSE en GitHub</a>.</p>
     <p>
       Más detalle técnico y bibliografía en el
-      <a href="https://github.com/datak0w/Lazaro/blob/main/README.md">README</a>.
+      <a href="https://github.com/datak0w/Lazaro/blob/main/README.md">README del repositorio</a>.
     </p>
   </main>
-  <footer class="site-footer">
-    <p><a href="index.html">← Volver al índice</a> · <a href="https://github.com/datak0w/Lazaro">GitHub</a></p>
+
+  <footer id="pie" class="site-footer">
+    <div class="wrap-footer">
+      <p>Lazaro AI — manual accesible.</p>
+      <ul aria-label="Enlaces del pie">
+        <li><a href="index.html">Inicio del manual</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad</a></li>
+        <li><a href="https://github.com/datak0w/Lazaro">GitHub</a></li>
+      </ul>
+    </div>
   </footer>
+  <script src="assets/a11y.js" defer></script>
 </body>
 </html>

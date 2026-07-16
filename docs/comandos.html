@@ -3,27 +3,48 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Comandos de voz. Manual accesible de Lazaro AI.">
   <title>Comandos de voz — Manual Lazaro AI</title>
   <link rel="stylesheet" href="assets/manual.css">
 </head>
 <body>
-  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <div class="skip-group">
+    <a href="#contenido">Saltar al contenido principal</a>
+    <a href="#nav-principal">Saltar al menú de secciones</a>
+    <a href="#pie">Saltar al pie de página</a>
+  </div>
+
   <header class="site-header">
-    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
-    <nav class="nav" aria-label="Secciones del manual">
-      <a href="index.html">Inicio</a>
-      <a href="primeros-pasos.html">Primeros pasos</a>
-      <a href="instalacion.html">Instalación</a>
-      <a href="permisos.html">Permisos</a>
-      <a href="comandos.html" aria-current="page">Comandos</a>
-      <a href="navegacion.html">Navegación</a>
-      <a href="memoria-ia.html">Memoria e IA</a>
-      <a href="configuracion.html">Configuración</a>
-      <a href="mapeo.html">Mapeo Ojén</a>
-      <a href="desarrolladores.html">Desarrolladores</a>
+    <div class="brand">
+      <p class="site-title"><a href="index.html">Lazaro AI</a></p>
+      <p>Manual de instrucciones accesible</p>
+    </div>
+    <nav id="nav-principal" class="nav" aria-labelledby="nav-titulo">
+      <h2 id="nav-titulo">Secciones del manual</h2>
+      <ul>
+        <li><a href="index.html">Inicio</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad de este manual</a></li>
+        <li><a href="primeros-pasos.html">Primeros pasos</a></li>
+        <li><a href="instalacion.html">Instalación</a></li>
+        <li><a href="permisos.html">Permisos</a></li>
+        <li><a href="comandos.html" aria-current="page">Comandos de voz</a></li>
+        <li><a href="navegacion.html">Navegación</a></li>
+        <li><a href="memoria-ia.html">Memoria e IA</a></li>
+        <li><a href="configuracion.html">Configuración</a></li>
+        <li><a href="mapeo.html">Mapeo de Ojén</a></li>
+        <li><a href="desarrolladores.html">Desarrolladores</a></li>
+      </ul>
     </nav>
   </header>
-  <main id="contenido" class="wrap">
+
+  <nav class="breadcrumb" aria-label="Miga de pan">
+    <ol>
+      <li><a href="index.html">Inicio</a></li>
+      <li aria-current="page">Comandos de voz</li>
+    </ol>
+  </nav>
+
+  <main id="contenido" class="wrap" tabindex="-1">
     <h1>Comandos de voz</h1>
     <p class="lead">Di «Lazaro» antes (o en la misma frase). Puedes variar las palabras.</p>
 
@@ -37,7 +58,7 @@
     <p>Si hay ruta grabada o sitio guardado, Lazaro lo propondrá antes de abrir Maps.</p>
 
     <h2>Sitios favoritos</h2>
-<pre><code>«Guarda sitio [nombre]»          → Ej: «guarda sitio farmacia»
+<pre><code>«Guarda sitio [nombre]»          → Ejemplo: «guarda sitio farmacia»
 «Guarda posición [nombre]»
 «Marca este lugar como [nombre]»
 «Mis sitios guardados»
@@ -59,7 +80,7 @@
 «¿En qué calle estoy?»
 «¿Dónde he estado las últimas horas?»</code></pre>
 
-    <h2>Tiempo (Ojén)</h2>
+    <h2>Tiempo en Ojén</h2>
 <pre><code>«¿Qué tiempo hace?»
 «¿Qué tiempo hace mañana?»
 «Tiempo en Ojén»
@@ -70,7 +91,7 @@
 «Cuánto es [número] por [número]»
 «Calcula 18 por 37»</code></pre>
 
-    <h2>Ticket / recibo</h2>
+    <h2>Ticket o recibo</h2>
 <pre><code>«Comprueba el ticket»
 «Lee el recibo»
 «Cuánto me cobran»</code></pre>
@@ -109,7 +130,10 @@
 
     <h2>Resumen de funciones</h2>
     <table>
-      <thead><tr><th>Área</th><th>Qué hace</th></tr></thead>
+      <caption>Áreas principales de la app</caption>
+      <thead>
+        <tr><th scope="col">Área</th><th scope="col">Qué hace</th></tr>
+      </thead>
       <tbody>
         <tr><td>Navegar a pie</td><td>Maps + giros hablados + vibración</td></tr>
         <tr><td>Rutas grabadas</td><td>Perfil espacial + replay híbrido</td></tr>
@@ -121,8 +145,17 @@
       </tbody>
     </table>
   </main>
-  <footer class="site-footer">
-    <p><a href="index.html">← Volver al índice</a></p>
+
+  <footer id="pie" class="site-footer">
+    <div class="wrap-footer">
+      <p>Lazaro AI — manual accesible.</p>
+      <ul aria-label="Enlaces del pie">
+        <li><a href="index.html">Inicio del manual</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad</a></li>
+        <li><a href="https://github.com/datak0w/Lazaro">GitHub</a></li>
+      </ul>
+    </div>
   </footer>
+  <script src="assets/a11y.js" defer></script>
 </body>
 </html>

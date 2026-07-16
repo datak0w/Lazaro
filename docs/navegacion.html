@@ -3,27 +3,48 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Navegación. Manual accesible de Lazaro AI.">
   <title>Navegación — Manual Lazaro AI</title>
   <link rel="stylesheet" href="assets/manual.css">
 </head>
 <body>
-  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <div class="skip-group">
+    <a href="#contenido">Saltar al contenido principal</a>
+    <a href="#nav-principal">Saltar al menú de secciones</a>
+    <a href="#pie">Saltar al pie de página</a>
+  </div>
+
   <header class="site-header">
-    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
-    <nav class="nav" aria-label="Secciones del manual">
-      <a href="index.html">Inicio</a>
-      <a href="primeros-pasos.html">Primeros pasos</a>
-      <a href="instalacion.html">Instalación</a>
-      <a href="permisos.html">Permisos</a>
-      <a href="comandos.html">Comandos</a>
-      <a href="navegacion.html" aria-current="page">Navegación</a>
-      <a href="memoria-ia.html">Memoria e IA</a>
-      <a href="configuracion.html">Configuración</a>
-      <a href="mapeo.html">Mapeo Ojén</a>
-      <a href="desarrolladores.html">Desarrolladores</a>
+    <div class="brand">
+      <p class="site-title"><a href="index.html">Lazaro AI</a></p>
+      <p>Manual de instrucciones accesible</p>
+    </div>
+    <nav id="nav-principal" class="nav" aria-labelledby="nav-titulo">
+      <h2 id="nav-titulo">Secciones del manual</h2>
+      <ul>
+        <li><a href="index.html">Inicio</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad de este manual</a></li>
+        <li><a href="primeros-pasos.html">Primeros pasos</a></li>
+        <li><a href="instalacion.html">Instalación</a></li>
+        <li><a href="permisos.html">Permisos</a></li>
+        <li><a href="comandos.html">Comandos de voz</a></li>
+        <li><a href="navegacion.html" aria-current="page">Navegación</a></li>
+        <li><a href="memoria-ia.html">Memoria e IA</a></li>
+        <li><a href="configuracion.html">Configuración</a></li>
+        <li><a href="mapeo.html">Mapeo de Ojén</a></li>
+        <li><a href="desarrolladores.html">Desarrolladores</a></li>
+      </ul>
     </nav>
   </header>
-  <main id="contenido" class="wrap">
+
+  <nav class="breadcrumb" aria-label="Miga de pan">
+    <ol>
+      <li><a href="index.html">Inicio</a></li>
+      <li aria-current="page">Navegación</li>
+    </ol>
+  </nav>
+
+  <main id="contenido" class="wrap" tabindex="-1">
     <h1>Navegación y guía por pitidos</h1>
     <p class="lead">Lazaro no sustituye Google Maps: lo complementa para personas ciegas.</p>
 
@@ -36,7 +57,10 @@
     </ol>
 
     <table>
-      <thead><tr><th>Maniobra</th><th>Vibración</th></tr></thead>
+      <caption>Patrones de vibración en giros</caption>
+      <thead>
+        <tr><th scope="col">Maniobra</th><th scope="col">Vibración</th></tr>
+      </thead>
       <tbody>
         <tr><td>Izquierda</td><td>Dos pulsos cortos</td></tr>
         <tr><td>Derecha</td><td>Un pulso medio</td></tr>
@@ -44,9 +68,10 @@
       </tbody>
     </table>
 
-    <div class="note">
+    <aside class="note" aria-label="Nota">
+      <span class="note-label">Nota</span>
       Necesitas: Maps instalado, <strong>acceso a notificaciones</strong> para Lazaro, volumen audible.
-    </div>
+    </aside>
 
     <h2>Chat durante la navegación</h2>
     <p>
@@ -55,8 +80,8 @@
       Al terminar, Lazaro pregunta: <em>«¿Seguimos hacia [destino]?»</em>
     </p>
     <ul>
-      <li><strong>Sí</strong> → reanuda la navegación</li>
-      <li><strong>No</strong> / <strong>«Para»</strong> → cancela la sesión</li>
+      <li><strong>Sí</strong> — reanuda la navegación</li>
+      <li><strong>No</strong> o <strong>«Para»</strong> — cancela la sesión</li>
     </ul>
 
     <h2>Rutas grabadas</h2>
@@ -74,11 +99,16 @@
     </p>
 
     <h2>Cómo interpretar los pitidos</h2>
-    <p>
-      <img src="pathguide-debug-preview.png" alt="Vista tipo debug: carretera, líneas guía y métricas" width="880" style="max-width:100%;height:auto;border-radius:8px">
-    </p>
+    <figure>
+      <img src="pathguide-debug-preview.png" width="880" height="495"
+        alt="Vista tipo depuración: carretera en perspectiva, líneas de borde izquierda y derecha, y paneles con métricas como offset lateral e intensidad de pitidos.">
+      <figcaption>Vista de depuración de PathGuide (referencia visual; la app se usa por audio).</figcaption>
+    </figure>
     <table>
-      <thead><tr><th>Señal</th><th>Significado</th></tr></thead>
+      <caption>Significado de los pitidos estéreo</caption>
+      <thead>
+        <tr><th scope="col">Señal</th><th scope="col">Significado</th></tr>
+      </thead>
       <tbody>
         <tr><td>Silencio</td><td>Vas bien centrado</td></tr>
         <tr><td>Pitido izquierdo</td><td>Desvíate un poco a la <strong>derecha</strong></td></tr>
@@ -90,12 +120,21 @@
 
     <h2>Sitios favoritos</h2>
     <ol>
-      <li>En la farmacia: <em>«Guarda sitio farmacia»</em> → sí</li>
-      <li>Otro día: <em>«Llévame a farmacia»</em> → Maps al punto exacto</li>
+      <li>En la farmacia: <em>«Guarda sitio farmacia»</em> y confirma con sí.</li>
+      <li>Otro día: <em>«Llévame a farmacia»</em> — Maps al punto exacto.</li>
     </ol>
   </main>
-  <footer class="site-footer">
-    <p><a href="index.html">← Volver al índice</a></p>
+
+  <footer id="pie" class="site-footer">
+    <div class="wrap-footer">
+      <p>Lazaro AI — manual accesible.</p>
+      <ul aria-label="Enlaces del pie">
+        <li><a href="index.html">Inicio del manual</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad</a></li>
+        <li><a href="https://github.com/datak0w/Lazaro">GitHub</a></li>
+      </ul>
+    </div>
   </footer>
+  <script src="assets/a11y.js" defer></script>
 </body>
 </html>

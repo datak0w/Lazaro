@@ -20,11 +20,11 @@
 <p align="center">
   📖 <strong><a href="https://datak0w.github.io/Lazaro/">Manual de instrucciones (GitHub Pages)</a></strong>
   &nbsp;·&nbsp;
+  <a href="https://datak0w.github.io/Lazaro/accesibilidad.html">Accesible con lector de pantalla</a>
+  &nbsp;·&nbsp;
   <a href="https://datak0w.github.io/Lazaro/comandos.html">Comandos</a>
   &nbsp;·&nbsp;
   <a href="https://datak0w.github.io/Lazaro/navegacion.html">Navegación</a>
-  &nbsp;·&nbsp;
-  <a href="https://datak0w.github.io/Lazaro/instalacion.html">Instalación</a>
 </p>
 
 ---
@@ -77,6 +77,7 @@ Lazaro AI usa **Google Gemini** de forma **responsable y acotada**:
 ## 📋 Tabla de contenidos
 
 - **[📖 Manual completo (GitHub Pages)](https://datak0w.github.io/Lazaro/)** — instalación, comandos, navegación, configuración, mapeo…
+- **[Accesibilidad del manual](https://datak0w.github.io/Lazaro/accesibilidad.html)** — pensado para NVDA, JAWS, TalkBack y VoiceOver
 - [Primeros pasos (sin tecnicismos)](#-primeros-pasos-sin-tecnicismos)
 - [Todas las funciones](#-todas-las-funciones)
 - [Comandos de voz completos](#-comandos-de-voz-completos)

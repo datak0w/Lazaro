@@ -3,75 +3,111 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Mapeo de Ojén. Manual accesible de Lazaro AI.">
   <title>Mapeo de Ojén — Manual Lazaro AI</title>
   <link rel="stylesheet" href="assets/manual.css">
 </head>
 <body>
-  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <div class="skip-group">
+    <a href="#contenido">Saltar al contenido principal</a>
+    <a href="#nav-principal">Saltar al menú de secciones</a>
+    <a href="#pie">Saltar al pie de página</a>
+  </div>
+
   <header class="site-header">
-    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
-    <nav class="nav" aria-label="Secciones del manual">
-      <a href="index.html">Inicio</a>
-      <a href="primeros-pasos.html">Primeros pasos</a>
-      <a href="instalacion.html">Instalación</a>
-      <a href="permisos.html">Permisos</a>
-      <a href="comandos.html">Comandos</a>
-      <a href="navegacion.html">Navegación</a>
-      <a href="memoria-ia.html">Memoria e IA</a>
-      <a href="configuracion.html">Configuración</a>
-      <a href="mapeo.html" aria-current="page">Mapeo Ojén</a>
-      <a href="desarrolladores.html">Desarrolladores</a>
+    <div class="brand">
+      <p class="site-title"><a href="index.html">Lazaro AI</a></p>
+      <p>Manual de instrucciones accesible</p>
+    </div>
+    <nav id="nav-principal" class="nav" aria-labelledby="nav-titulo">
+      <h2 id="nav-titulo">Secciones del manual</h2>
+      <ul>
+        <li><a href="index.html">Inicio</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad de este manual</a></li>
+        <li><a href="primeros-pasos.html">Primeros pasos</a></li>
+        <li><a href="instalacion.html">Instalación</a></li>
+        <li><a href="permisos.html">Permisos</a></li>
+        <li><a href="comandos.html">Comandos de voz</a></li>
+        <li><a href="navegacion.html">Navegación</a></li>
+        <li><a href="memoria-ia.html">Memoria e IA</a></li>
+        <li><a href="configuracion.html">Configuración</a></li>
+        <li><a href="mapeo.html" aria-current="page">Mapeo de Ojén</a></li>
+        <li><a href="desarrolladores.html">Desarrolladores</a></li>
+      </ul>
     </nav>
   </header>
-  <main id="contenido" class="wrap">
-    <h1>Mapeo de Ojén (GoPro + 3D)</h1>
+
+  <nav class="breadcrumb" aria-label="Miga de pan">
+    <ol>
+      <li><a href="index.html">Inicio</a></li>
+      <li aria-current="page">Mapeo de Ojén</li>
+    </ol>
+  </nav>
+
+  <main id="contenido" class="wrap" tabindex="-1">
+    <h1>Mapeo de Ojén (GoPro y modelo 3D)</h1>
     <p class="lead">
       Cartografiamos el pueblo a pie para hacerlo más accesible: aceras, pendientes, verjas y bifurcaciones,
       en un mapa offline en el móvil.
     </p>
 
-    <p>
-      <img src="ojen-3d-grid-map.png" alt="Ilustración de mapa 3D con corredor pueblo a casa" width="880" style="max-width:100%;height:auto;border-radius:8px">
-    </p>
+    <figure>
+      <img src="ojen-3d-grid-map.png" width="880" height="495"
+        alt="Ilustración de un mapa inclinado con cuadrícula 3D y un corredor amarillo desde Pueblo hasta Casa, con nodos fork, gate y road_cross.">
+      <figcaption>Esquema del corredor pueblo→casa sobre una malla 3D (ilustración).</figcaption>
+    </figure>
 
     <h2>Cómo se captura</h2>
     <ol>
       <li>Paseamos con <strong>GoPro 11</strong> en timelapse, GPS activo, cámara hacia abajo (pértiga 2 m).</li>
       <li>Cada foto lleva coordenadas GPS.</li>
-      <li><strong>OpenDroneMap</strong> reconstruye en 3D (ortofoto, DTM, nube de puntos).</li>
+      <li><strong>OpenDroneMap</strong> reconstruye en 3D (ortofoto, modelo del terreno, nube de puntos).</li>
       <li>En <strong>QGIS</strong> se digitaliza el eje, pendiente, ancho y nodos.</li>
-      <li>Se exporta un bundle offline (GeoJSON + JSON) al móvil.</li>
+      <li>Se exporta un paquete offline (GeoJSON y JSON) al móvil.</li>
     </ol>
 
     <p>
-      <a href="gopro-captura-checklist.pdf"><strong>Descargar checklist de captura (PDF)</strong></a>
+      <a href="gopro-captura-checklist.pdf">Descargar checklist de captura GoPro (PDF)</a>
       — imprimir y marcar en el campo.
+      También hay <a href="gopro-captura-checklist.html">versión HTML del checklist</a>.
     </p>
 
     <h2>Tres capas en el móvil</h2>
     <table>
-      <thead><tr><th>Capa</th><th>Origen</th><th>Aporta</th></tr></thead>
+      <caption>Capas de mapa usadas por Lazaro</caption>
+      <thead>
+        <tr><th scope="col">Capa</th><th scope="col">Origen</th><th scope="col">Aporta</th></tr>
+      </thead>
       <tbody>
         <tr><td>OSM</td><td>Overpass → caché</td><td>Clasificar urbano / campo / arbolado</td></tr>
-        <tr><td>Rutas + heatmap</td><td>Paseos con cámara</td><td>Perfil lateral aprendido</td></tr>
+        <tr><td>Rutas y mapa de calor</td><td>Paseos con cámara</td><td>Perfil lateral aprendido</td></tr>
         <tr><td>Corredor ODM</td><td>GoPro + ODM + QGIS</td><td>Eje, pendiente, ancho, nodos</td></tr>
       </tbody>
     </table>
 
-    <h2>Archivos del bundle</h2>
+    <h2>Archivos del paquete</h2>
     <p>Copiar a <code>files/maps/ojen_odm/</code> o incluir en assets:</p>
     <ul>
       <li><code>corridor_path.geojson</code> — eje del corredor</li>
-      <li><code>corridor_profile.json</code> — alongM, bearing, gradePct, widthM, segmentTag</li>
-      <li><code>corridor_nodes.json</code> — fork, gate, road_cross, destination</li>
+      <li><code>corridor_profile.json</code> — distancia, rumbo, pendiente, ancho, tipo de tramo</li>
+      <li><code>corridor_nodes.json</code> — bifurcación, verja, cruce, destino</li>
     </ul>
 
     <h2>Comando ODM sugerido</h2>
 <pre><code>docker run -ti --rm -v /ruta/proyecto:/datasets/code opendronemap/odm \
   --project-path /datasets --dtm --dem-resolution 5 --orthophoto-resolution 2</code></pre>
   </main>
-  <footer class="site-footer">
-    <p><a href="index.html">← Volver al índice</a></p>
+
+  <footer id="pie" class="site-footer">
+    <div class="wrap-footer">
+      <p>Lazaro AI — manual accesible.</p>
+      <ul aria-label="Enlaces del pie">
+        <li><a href="index.html">Inicio del manual</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad</a></li>
+        <li><a href="https://github.com/datak0w/Lazaro">GitHub</a></li>
+      </ul>
+    </div>
   </footer>
+  <script src="assets/a11y.js" defer></script>
 </body>
 </html>

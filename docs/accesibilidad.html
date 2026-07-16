@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cómo usar el manual de Lazaro AI con lectores de pantalla: NVDA, JAWS, TalkBack y VoiceOver.">
+  <title>Accesibilidad de este manual — Lazaro AI</title>
+  <link rel="stylesheet" href="assets/manual.css">
+</head>
+<body>
+  <div class="skip-group">
+    <a href="#contenido">Saltar al contenido principal</a>
+    <a href="#nav-principal">Saltar al menú de secciones</a>
+    <a href="#pie">Saltar al pie de página</a>
+  </div>
+
+  <header class="site-header">
+    <div class="brand">
+      <p class="site-title"><a href="index.html">Lazaro AI</a></p>
+      <p>Manual de instrucciones accesible</p>
+    </div>
+    <nav id="nav-principal" class="nav" aria-labelledby="nav-titulo">
+      <h2 id="nav-titulo">Secciones del manual</h2>
+      <ul>
+        <li><a href="index.html">Inicio</a></li>
+        <li><a href="accesibilidad.html" aria-current="page">Accesibilidad de este manual</a></li>
+        <li><a href="primeros-pasos.html">Primeros pasos</a></li>
+        <li><a href="instalacion.html">Instalación</a></li>
+        <li><a href="permisos.html">Permisos</a></li>
+        <li><a href="comandos.html">Comandos de voz</a></li>
+        <li><a href="navegacion.html">Navegación</a></li>
+        <li><a href="memoria-ia.html">Memoria e IA</a></li>
+        <li><a href="configuracion.html">Configuración</a></li>
+        <li><a href="mapeo.html">Mapeo de Ojén</a></li>
+        <li><a href="desarrolladores.html">Desarrolladores</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <nav class="breadcrumb" aria-label="Miga de pan">
+    <ol>
+      <li><a href="index.html">Inicio</a></li>
+      <li aria-current="page">Accesibilidad</li>
+    </ol>
+  </nav>
+
+  <main id="contenido" class="wrap" tabindex="-1">
+    <h1>Accesibilidad de este manual</h1>
+    <p class="lead">
+      Este manual está pensado para personas ciegas o con baja visión que usan
+      <strong>lector de pantalla</strong> o solo teclado.
+    </p>
+
+    <h2>Qué hemos hecho para que sea usable</h2>
+    <ul>
+      <li><strong>Idioma en español</strong> declarado en cada página (<code>lang="es"</code>).</li>
+      <li><strong>Un solo título principal (h1)</strong> por página; secciones con h2 y h3 ordenados.</li>
+      <li><strong>Regiones:</strong> cabecera, menú de navegación, contenido principal y pie.</li>
+      <li><strong>Menú en lista</strong> de enlaces (no solo texto suelto), para navegar por lista o por enlace.</li>
+      <li><strong>Enlaces de salto</strong> al inicio de cada página (contenido, menú, pie).</li>
+      <li><strong>Miga de pan</strong> para saber dónde estás.</li>
+      <li><strong>Tablas con título (caption)</strong> y encabezados de columna.</li>
+      <li><strong>Avisos</strong> con etiqueta hablada («Importante», «Atención», «Consejo»), no solo color.</li>
+      <li><strong>Enlaces con texto claro</strong> (evitamos «pincha aquí»).</li>
+      <li><strong>Foco visible</strong> al tabular (resaltado amarillo/negro).</li>
+      <li><strong>Contraste alto</strong> y respeto a «reducir movimiento» del sistema.</li>
+    </ul>
+
+    <h2>Atajos habituales con lector de pantalla</h2>
+    <table>
+      <caption>Navegación rápida por tipo de elemento</caption>
+      <thead>
+        <tr>
+          <th scope="col">Lector</th>
+          <th scope="col">Títulos</th>
+          <th scope="col">Regiones / landmarks</th>
+          <th scope="col">Enlaces</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>NVDA</td>
+          <td>H (Shift+H atrás)</td>
+          <td>D</td>
+          <td>K</td>
+        </tr>
+        <tr>
+          <td>JAWS</td>
+          <td>H</td>
+          <td>R (regiones)</td>
+          <td>Insert+F7 lista de enlaces</td>
+        </tr>
+        <tr>
+          <td>TalkBack</td>
+          <td>Menú de lectura → Encabezados</td>
+          <td>Menú de lectura → Controles</td>
+          <td>Menú de lectura → Enlaces</td>
+        </tr>
+        <tr>
+          <td>VoiceOver</td>
+          <td>Rotor → Encabezados</td>
+          <td>Rotor → Contenedores / landmarks</td>
+          <td>Rotor → Enlaces</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Orden recomendado de lectura</h2>
+    <ol>
+      <li>Enlace «Saltar al contenido principal» (si usas teclado).</li>
+      <li>Título h1 de la página.</li>
+      <li>Recorrer h2 de esa página.</li>
+      <li>Si quieres otra sección: menú «Secciones del manual» o volver a <a href="index.html">Inicio</a>.</li>
+    </ol>
+
+    <h2>Imágenes</h2>
+    <p>
+      Las figuras del manual tienen texto alternativo descriptivo.
+      Si una imagen solo decora, se marca como decorativa (alternativa vacía) para que el lector la ignore.
+    </p>
+
+    <h2>PDF del checklist GoPro</h2>
+    <p>
+      El <a href="gopro-captura-checklist.pdf">checklist de captura GoPro (PDF)</a>
+      es un documento aparte. Los lectores de pantalla suelen leer PDF etiquetado;
+      si encuentras problemas, abre también la versión HTML
+      <a href="gopro-captura-checklist.html">checklist en HTML</a>.
+    </p>
+
+    <h2>Informar de un problema de accesibilidad</h2>
+    <p>
+      Si algo no se lee bien o falta un encabezado, abre una incidencia:
+      <a href="https://github.com/datak0w/Lazaro/issues">GitHub Issues de Lazaro</a>
+      y describe el lector (NVDA, TalkBack…) y la página.
+    </p>
+
+    <aside class="note" aria-label="Consejo">
+      <span class="note-label">Consejo</span>
+      La app Lazaro AI está pensada para usarse <strong>por voz</strong>, sin mirar la pantalla.
+      Este manual es para aprender o consultar desde el PC o el móvil con lector.
+    </aside>
+  </main>
+
+  <footer id="pie" class="site-footer">
+    <div class="wrap-footer">
+      <p>Lazaro AI — manual accesible.</p>
+      <ul aria-label="Enlaces del pie">
+        <li><a href="index.html">Inicio del manual</a></li>
+        <li><a href="https://github.com/datak0w/Lazaro">GitHub</a></li>
+      </ul>
+    </div>
+  </footer>
+  <script src="assets/a11y.js" defer></script>
+</body>
+</html>

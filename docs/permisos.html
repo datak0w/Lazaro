@@ -3,32 +3,60 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Permisos. Manual accesible de Lazaro AI.">
   <title>Permisos — Manual Lazaro AI</title>
   <link rel="stylesheet" href="assets/manual.css">
 </head>
 <body>
-  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <div class="skip-group">
+    <a href="#contenido">Saltar al contenido principal</a>
+    <a href="#nav-principal">Saltar al menú de secciones</a>
+    <a href="#pie">Saltar al pie de página</a>
+  </div>
+
   <header class="site-header">
-    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
-    <nav class="nav" aria-label="Secciones del manual">
-      <a href="index.html">Inicio</a>
-      <a href="primeros-pasos.html">Primeros pasos</a>
-      <a href="instalacion.html">Instalación</a>
-      <a href="permisos.html" aria-current="page">Permisos</a>
-      <a href="comandos.html">Comandos</a>
-      <a href="navegacion.html">Navegación</a>
-      <a href="memoria-ia.html">Memoria e IA</a>
-      <a href="configuracion.html">Configuración</a>
-      <a href="mapeo.html">Mapeo Ojén</a>
-      <a href="desarrolladores.html">Desarrolladores</a>
+    <div class="brand">
+      <p class="site-title"><a href="index.html">Lazaro AI</a></p>
+      <p>Manual de instrucciones accesible</p>
+    </div>
+    <nav id="nav-principal" class="nav" aria-labelledby="nav-titulo">
+      <h2 id="nav-titulo">Secciones del manual</h2>
+      <ul>
+        <li><a href="index.html">Inicio</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad de este manual</a></li>
+        <li><a href="primeros-pasos.html">Primeros pasos</a></li>
+        <li><a href="instalacion.html">Instalación</a></li>
+        <li><a href="permisos.html" aria-current="page">Permisos</a></li>
+        <li><a href="comandos.html">Comandos de voz</a></li>
+        <li><a href="navegacion.html">Navegación</a></li>
+        <li><a href="memoria-ia.html">Memoria e IA</a></li>
+        <li><a href="configuracion.html">Configuración</a></li>
+        <li><a href="mapeo.html">Mapeo de Ojén</a></li>
+        <li><a href="desarrolladores.html">Desarrolladores</a></li>
+      </ul>
     </nav>
   </header>
-  <main id="contenido" class="wrap">
+
+  <nav class="breadcrumb" aria-label="Miga de pan">
+    <ol>
+      <li><a href="index.html">Inicio</a></li>
+      <li aria-current="page">Permisos</li>
+    </ol>
+  </nav>
+
+  <main id="contenido" class="wrap" tabindex="-1">
     <h1>Permisos necesarios</h1>
     <p class="lead">Sin estos permisos, Lazaro no puede escucharte ni guiarte con seguridad.</p>
 
     <table>
-      <thead><tr><th>Permiso</th><th>Para qué</th><th>Obligatorio</th></tr></thead>
+      <caption>Permisos del sistema y para qué sirven</caption>
+      <thead>
+        <tr>
+          <th scope="col">Permiso</th>
+          <th scope="col">Para qué</th>
+          <th scope="col">Obligatorio</th>
+        </tr>
+      </thead>
       <tbody>
         <tr><td>Micrófono</td><td>Escucharte y detectar «Lazaro»</td><td>Sí</td></tr>
         <tr><td>Ubicación</td><td>Navegar, sitios, rutas, «dónde estoy»</td><td>Sí (movilidad)</td></tr>
@@ -48,13 +76,23 @@
       <li>Sin esto, no oirás los giros de Maps ni podrá leer WhatsApp.</li>
     </ol>
 
-    <div class="warn">
-      <strong>Importante:</strong> el acceso a notificaciones es sensible.
+    <aside class="warn" aria-label="Atención">
+      <span class="warn-label">Atención</span>
+      El acceso a notificaciones es sensible.
       Lazaro lo usa solo para Maps y mensajería; el código es auditable en GitHub.
-    </div>
+    </aside>
   </main>
-  <footer class="site-footer">
-    <p><a href="index.html">← Volver al índice</a></p>
+
+  <footer id="pie" class="site-footer">
+    <div class="wrap-footer">
+      <p>Lazaro AI — manual accesible.</p>
+      <ul aria-label="Enlaces del pie">
+        <li><a href="index.html">Inicio del manual</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad</a></li>
+        <li><a href="https://github.com/datak0w/Lazaro">GitHub</a></li>
+      </ul>
+    </div>
   </footer>
+  <script src="assets/a11y.js" defer></script>
 </body>
 </html>

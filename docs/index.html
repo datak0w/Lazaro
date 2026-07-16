@@ -3,95 +3,104 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Manual de instrucciones de Lazaro AI: instalación, comandos de voz, navegación, configuración y más.">
-  <title>Manual Lazaro AI</title>
+  <meta name="description" content="Manual accesible de Lazaro AI para personas ciegas y con baja visión. Compatible con lectores de pantalla.">
+  <title>Inicio — Manual accesible de Lazaro AI</title>
   <link rel="stylesheet" href="assets/manual.css">
 </head>
 <body>
-  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <div class="skip-group">
+    <a href="#contenido">Saltar al contenido principal</a>
+    <a href="#nav-principal">Saltar al menú de secciones</a>
+    <a href="#pie">Saltar al pie de página</a>
+  </div>
+
   <header class="site-header">
     <div class="brand">
-      <strong>Lazaro AI</strong>
-      <span>Manual de instrucciones</span>
+      <p class="site-title"><a href="index.html">Lazaro AI</a></p>
+      <p>Manual de instrucciones accesible</p>
     </div>
-    <nav class="nav" aria-label="Secciones del manual">
-      <a href="index.html" aria-current="page">Inicio</a>
-      <a href="primeros-pasos.html">Primeros pasos</a>
-      <a href="instalacion.html">Instalación</a>
-      <a href="permisos.html">Permisos</a>
-      <a href="comandos.html">Comandos</a>
-      <a href="navegacion.html">Navegación</a>
-      <a href="memoria-ia.html">Memoria e IA</a>
-      <a href="configuracion.html">Configuración</a>
-      <a href="mapeo.html">Mapeo Ojén</a>
-      <a href="desarrolladores.html">Desarrolladores</a>
+    <nav id="nav-principal" class="nav" aria-labelledby="nav-titulo">
+      <h2 id="nav-titulo">Secciones del manual</h2>
+      <ul>
+        <li><a href="index.html" aria-current="page">Inicio</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad de este manual</a></li>
+        <li><a href="primeros-pasos.html">Primeros pasos</a></li>
+        <li><a href="instalacion.html">Instalación</a></li>
+        <li><a href="permisos.html">Permisos</a></li>
+        <li><a href="comandos.html">Comandos de voz</a></li>
+        <li><a href="navegacion.html">Navegación</a></li>
+        <li><a href="memoria-ia.html">Memoria e IA</a></li>
+        <li><a href="configuracion.html">Configuración</a></li>
+        <li><a href="mapeo.html">Mapeo de Ojén</a></li>
+        <li><a href="desarrolladores.html">Desarrolladores</a></li>
+      </ul>
     </nav>
   </header>
 
-  <main id="contenido" class="wrap">
+  <nav class="breadcrumb" aria-label="Miga de pan">
+    <ol>
+      <li aria-current="page">Inicio</li>
+    </ol>
+  </nav>
+
+  <main id="contenido" class="wrap" tabindex="-1">
     <h1>Manual de Lazaro AI</h1>
     <p class="lead">
-      Guía completa para usar el asistente de voz libre para personas ciegas o con baja visión.
-      Hecho en Ojén (Málaga). Software libre (Apache 2.0).
+      Guía completa para usar el asistente de voz libre.
+      Pensada para leerse con <strong>lector de pantalla</strong> (NVDA, JAWS, TalkBack, VoiceOver) o con teclado.
     </p>
 
-    <div class="ok">
-      <strong>Regla de oro:</strong> lo que importa para tu seguridad al caminar
-      (pitidos, cámara, GPS, rutas) corre <strong>en el teléfono</strong>, sin esperar a un servidor.
-      La IA solo ayuda en el diálogo y la memoria.
-    </div>
+    <aside class="ok" aria-label="Consejo importante">
+      <span class="ok-label">Importante</span>
+      Lo que importa para tu seguridad al caminar (pitidos, cámara, GPS, rutas) corre
+      <strong>en el teléfono</strong>, sin esperar a un servidor. La IA solo ayuda en el diálogo y la memoria.
+    </aside>
+
+    <h2>Cómo leer este manual con lector de pantalla</h2>
+    <p>
+      Este sitio usa encabezados, listas y regiones (landmarks) para que puedas saltar rápido.
+      Detalle en <a href="accesibilidad.html">Accesibilidad de este manual</a>.
+    </p>
+    <ul>
+      <li><strong>NVDA / JAWS (Windows):</strong> tecla H para recorrer títulos; D para regiones; K para enlaces.</li>
+      <li><strong>TalkBack (Android):</strong> explorar por encabezados o por enlaces desde el menú de lectura.</li>
+      <li><strong>VoiceOver (iPhone/Mac):</strong> rotor → Encabezados o Enlaces.</li>
+    </ul>
 
     <h2>Índice del manual</h2>
-    <div class="card-grid">
-      <a class="card" href="primeros-pasos.html">
-        <h2>Primeros pasos</h2>
-        <p>Cómo encender Lazaro y hablar con él en 5 minutos.</p>
-      </a>
-      <a class="card" href="instalacion.html">
-        <h2>Instalación</h2>
-        <p>APK, Android 8+, orígenes desconocidos y primeros arranques.</p>
-      </a>
-      <a class="card" href="permisos.html">
-        <h2>Permisos</h2>
-        <p>Micrófono, ubicación, notificaciones, cámara y accesibilidad.</p>
-      </a>
-      <a class="card" href="comandos.html">
-        <h2>Comandos de voz</h2>
-        <p>Lista completa: navegación, WhatsApp, tiempo, media, memoria…</p>
-      </a>
-      <a class="card" href="navegacion.html">
-        <h2>Navegación y pitidos</h2>
-        <p>Maps, rutas grabadas, modo paseo, chat durante la ruta y reanudar.</p>
-      </a>
-      <a class="card" href="memoria-ia.html">
-        <h2>Memoria e IA</h2>
-        <p>Qué recuerda Lazaro, qué propone y dónde entra Gemini.</p>
-      </a>
-      <a class="card" href="configuracion.html">
-        <h2>Configuración</h2>
-        <p>Clave Gemini, modelo, hardware recomendado y tipografía de uso.</p>
-      </a>
-      <a class="card" href="mapeo.html">
-        <h2>Mapeo de Ojén</h2>
-        <p>GoPro 11, fotogrametría 3D, bundle offline y checklist de captura.</p>
-      </a>
-      <a class="card" href="desarrolladores.html">
-        <h2>Desarrolladores</h2>
-        <p>Compilar, tests, arquitectura y cómo contribuir.</p>
-      </a>
-    </div>
+    <p>Lista de secciones. Cada enlace abre una página completa.</p>
+    <ol class="toc-list">
+      <li><a href="accesibilidad.html">Accesibilidad de este manual</a> — cómo usarlo con lector de pantalla</li>
+      <li><a href="primeros-pasos.html">Primeros pasos</a> — encender Lazaro y hablar en 5 minutos</li>
+      <li><a href="instalacion.html">Instalación</a> — APK y Android 8+</li>
+      <li><a href="permisos.html">Permisos</a> — micrófono, ubicación, notificaciones</li>
+      <li><a href="comandos.html">Comandos de voz</a> — lista completa de frases</li>
+      <li><a href="navegacion.html">Navegación</a> — Maps, pitidos, chat durante la ruta</li>
+      <li><a href="memoria-ia.html">Memoria e IA</a> — qué recuerda y qué propone</li>
+      <li><a href="configuracion.html">Configuración</a> — Gemini, hardware, DEBUG</li>
+      <li><a href="mapeo.html">Mapeo de Ojén</a> — GoPro, 3D y checklist PDF</li>
+      <li><a href="desarrolladores.html">Desarrolladores</a> — compilar y contribuir</li>
+    </ol>
 
-    <h2>Enlaces rápidos</h2>
+    <h2>Enlaces externos</h2>
     <ul>
-      <li><a href="https://github.com/datak0w/Lazaro">Código en GitHub</a></li>
-      <li><a href="https://github.com/datak0w/Lazaro/issues">Incidencias</a></li>
-      <li><a href="gopro-captura-checklist.pdf">Checklist captura GoPro (PDF)</a></li>
-      <li><a href="https://github.com/datak0w/Lazaro/blob/main/README.md">README del repositorio</a></li>
+      <li><a href="https://github.com/datak0w/Lazaro">Código fuente en GitHub</a></li>
+      <li><a href="https://github.com/datak0w/Lazaro/issues">Abrir una incidencia en GitHub</a></li>
+      <li><a href="gopro-captura-checklist.pdf">Descargar checklist de captura GoPro (PDF)</a></li>
+      <li><a href="https://github.com/datak0w/Lazaro/blob/main/README.md">README del repositorio en GitHub</a></li>
     </ul>
   </main>
 
-  <footer class="site-footer">
-    <p>Lazaro AI — de Ojén para el mundo. <a href="https://github.com/datak0w/Lazaro">GitHub</a></p>
+  <footer id="pie" class="site-footer">
+    <div class="wrap-footer">
+      <p>Lazaro AI — de Ojén para el mundo. Software libre Apache 2.0.</p>
+      <ul aria-label="Enlaces del pie">
+        <li><a href="index.html">Inicio del manual</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad</a></li>
+        <li><a href="https://github.com/datak0w/Lazaro">GitHub</a></li>
+      </ul>
+    </div>
   </footer>
+  <script src="assets/a11y.js" defer></script>
 </body>
 </html>

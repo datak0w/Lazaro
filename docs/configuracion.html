@@ -3,27 +3,48 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Configuración. Manual accesible de Lazaro AI.">
   <title>Configuración — Manual Lazaro AI</title>
   <link rel="stylesheet" href="assets/manual.css">
 </head>
 <body>
-  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <div class="skip-group">
+    <a href="#contenido">Saltar al contenido principal</a>
+    <a href="#nav-principal">Saltar al menú de secciones</a>
+    <a href="#pie">Saltar al pie de página</a>
+  </div>
+
   <header class="site-header">
-    <div class="brand"><strong>Lazaro AI</strong><span>Manual</span></div>
-    <nav class="nav" aria-label="Secciones del manual">
-      <a href="index.html">Inicio</a>
-      <a href="primeros-pasos.html">Primeros pasos</a>
-      <a href="instalacion.html">Instalación</a>
-      <a href="permisos.html">Permisos</a>
-      <a href="comandos.html">Comandos</a>
-      <a href="navegacion.html">Navegación</a>
-      <a href="memoria-ia.html">Memoria e IA</a>
-      <a href="configuracion.html" aria-current="page">Configuración</a>
-      <a href="mapeo.html">Mapeo Ojén</a>
-      <a href="desarrolladores.html">Desarrolladores</a>
+    <div class="brand">
+      <p class="site-title"><a href="index.html">Lazaro AI</a></p>
+      <p>Manual de instrucciones accesible</p>
+    </div>
+    <nav id="nav-principal" class="nav" aria-labelledby="nav-titulo">
+      <h2 id="nav-titulo">Secciones del manual</h2>
+      <ul>
+        <li><a href="index.html">Inicio</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad de este manual</a></li>
+        <li><a href="primeros-pasos.html">Primeros pasos</a></li>
+        <li><a href="instalacion.html">Instalación</a></li>
+        <li><a href="permisos.html">Permisos</a></li>
+        <li><a href="comandos.html">Comandos de voz</a></li>
+        <li><a href="navegacion.html">Navegación</a></li>
+        <li><a href="memoria-ia.html">Memoria e IA</a></li>
+        <li><a href="configuracion.html" aria-current="page">Configuración</a></li>
+        <li><a href="mapeo.html">Mapeo de Ojén</a></li>
+        <li><a href="desarrolladores.html">Desarrolladores</a></li>
+      </ul>
     </nav>
   </header>
-  <main id="contenido" class="wrap">
+
+  <nav class="breadcrumb" aria-label="Miga de pan">
+    <ol>
+      <li><a href="index.html">Inicio</a></li>
+      <li aria-current="page">Configuración</li>
+    </ol>
+  </nav>
+
+  <main id="contenido" class="wrap" tabindex="-1">
     <h1>Configuración</h1>
     <p class="lead">Ajustes al compilar la app y consejos de uso diario.</p>
 
@@ -35,9 +56,10 @@
 <pre><code>cp local.properties.example local.properties</code></pre>
 <pre><code>GEMINI_API_KEY=tu_clave_aqui
 GEMINI_MODEL=gemini-3.5-flash</code></pre>
-    <div class="warn">
-      <strong>No subas</strong> <code>local.properties</code> ni claves a Git.
-    </div>
+    <aside class="warn" aria-label="Atención">
+      <span class="warn-label">Atención</span>
+      No subas <code>local.properties</code> ni claves a Git.
+    </aside>
     <p>
       Puedes cambiar el modelo Gemini con <code>GEMINI_MODEL</code> (por ejemplo otro Flash)
       y recompilar. Otros proveedores (OpenAI, etc.) no están soportados aún.
@@ -45,24 +67,27 @@ GEMINI_MODEL=gemini-3.5-flash</code></pre>
 
     <h2>Hardware recomendado</h2>
     <table>
-      <thead><tr><th>Dispositivo</th><th>Rol</th><th>Capacidades</th></tr></thead>
+      <caption>Dispositivos y capacidades</caption>
+      <thead>
+        <tr><th scope="col">Dispositivo</th><th scope="col">Rol</th><th scope="col">Capacidades</th></tr>
+      </thead>
       <tbody>
         <tr><td>Samsung Galaxy A34</td><td>Desarrollo / pruebas</td><td>Cámara + IMU (pipeline monocular)</td></tr>
         <tr><td>Google Pixel 9</td><td>Cliente final</td><td>LDAF + ARCore Depth</td></tr>
       </tbody>
     </table>
 
-    <h2>Pantalla DEBUG (PathGuide)</h2>
+    <h2>Pantalla DEBUG de PathGuide</h2>
     <p>
-      En ajustes de PathGuide puedes ver offset lateral, bordes, intensidad L/R,
-      fuente de percepción y métricas ODM (<code>odmScore</code>, pendiente, etc.).
+      En ajustes de PathGuide puedes ver offset lateral, bordes, intensidad izquierda/derecha,
+      fuente de percepción y métricas ODM.
     </p>
 
     <h2>Consejos de uso diario</h2>
     <ul>
-      <li>Volumen de medios audible (TTS y pitidos).</li>
+      <li>Volumen de medios audible (síntesis de voz y pitidos).</li>
       <li>Auricular o altavoz libre; evita cubrir el micrófono.</li>
-      <li>GPS al aire libre para snap de rutas y sitios.</li>
+      <li>GPS al aire libre para rutas y sitios.</li>
       <li>Di «para» si quieres callar o cortar una sesión.</li>
       <li>Confirma siempre antes de navegar o llamar.</li>
     </ul>
@@ -74,8 +99,17 @@ GEMINI_MODEL=gemini-3.5-flash</code></pre>
       Detalle en <a href="mapeo.html">Mapeo de Ojén</a>.
     </p>
   </main>
-  <footer class="site-footer">
-    <p><a href="index.html">← Volver al índice</a></p>
+
+  <footer id="pie" class="site-footer">
+    <div class="wrap-footer">
+      <p>Lazaro AI — manual accesible.</p>
+      <ul aria-label="Enlaces del pie">
+        <li><a href="index.html">Inicio del manual</a></li>
+        <li><a href="accesibilidad.html">Accesibilidad</a></li>
+        <li><a href="https://github.com/datak0w/Lazaro">GitHub</a></li>
+      </ul>
+    </div>
   </footer>
+  <script src="assets/a11y.js" defer></script>
 </body>
 </html>
