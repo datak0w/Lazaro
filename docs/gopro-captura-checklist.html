@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Checklist captura GoPro 11 — Corredor Ojén pueblo→casa</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    body { font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #1a1a1a; line-height: 1.45; }
+    h1 { font-size: 18pt; margin-bottom: 4px; color: #0d47a1; }
+    h2 { font-size: 13pt; margin-top: 18px; margin-bottom: 8px; color: #1565c0; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+    .meta { font-size: 10pt; color: #555; margin-bottom: 16px; }
+    .box { background: #f5f8ff; border: 1px solid #c5cae9; padding: 10px 12px; margin: 10px 0; border-radius: 4px; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+    th, td { border: 1px solid #bbb; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #e8eaf6; font-size: 10pt; }
+    .check { width: 28px; text-align: center; font-size: 14pt; }
+    ul { margin: 6px 0; padding-left: 20px; }
+    li { margin: 4px 0; }
+    .footer { margin-top: 20px; font-size: 9pt; color: #666; border-top: 1px solid #ddd; padding-top: 8px; }
+    .warn { color: #b71c1c; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<h1>Checklist de captura — GoPro 11 + pértiga 2 m</h1>
+<p class="meta">
+  <strong>Proyecto:</strong> Lazaro AI — corredor pueblo → casa (Ojén)<br>
+  <strong>Método:</strong> Fotogrametría terrestre → OpenDroneMap → bundle offline<br>
+  <strong>Permiso:</strong> Ayuntamiento de Ojén (confirmado)
+</p>
+
+<div class="box">
+  <strong>Objetivo:</strong> Mapear el camino exacto que usa la persona ciega entre el pueblo y su casa.
+  Caminar el corredor con GoPro en timelapse (GPS activo) a 2 m de altura, mirando al suelo (nadir).
+</div>
+
+<h2>1. Antes de salir</h2>
+<table>
+  <tr><th class="check">☐</th><td>GoPro 11 cargada al 100 %</td></tr>
+  <tr><th class="check">☐</th><td>Tarjeta microSD vacía (≥ 32 GB) y formateada en cámara</td></tr>
+  <tr><th class="check">☐</th><td>GPS activado en GoPro (Ajustes → GPS → ON)</td></tr>
+  <tr><th class="check">☐</th><td>Modo <strong>Timelapse foto</strong> configurado (0,5 s o 1 s entre fotos)</td></tr>
+  <tr><th class="check">☐</th><td>Resolución foto: máxima (12 MP o superior)</td></tr>
+  <tr><th class="check">☐</th><td>Estabilización: OFF (mejor para fotogrametría)</td></tr>
+  <tr><th class="check">☐</th><td>Pértiga 2 m montada; cámara orientada <strong>hacia abajo</strong> (nadir)</td></tr>
+  <tr><th class="check">☐</th><td>Día despejado, sin lluvia; evitar viento fuerte</td></tr>
+  <tr><th class="check">☐</th><td>Hora recomendada: 10:00–16:00 (sombras moderadas)</td></tr>
+  <tr><th class="check">☐</th><td>Móvil con app GoPro emparejada (verificar icono GPS fijo antes de grabar)</td></tr>
+  <tr><th class="check">☐</th><td>Chinchetas / spray / cinta para marcar 4–6 GCPs opcionales (mejora precisión)</td></tr>
+  <tr><th class="check">☐</th><td>Lista de nodos anotada: bifurcaciones, verjas, cruces, casa</td></tr>
+</table>
+
+<h2>2. Puntos de control (GCP) — opcional pero recomendado</h2>
+<p>Marca 4–6 puntos visibles en el suelo y registra coordenadas con el móvil (GPS fijo 30 s):</p>
+<table>
+  <tr><th>ID</th><th>Ubicación</th><th>Lat</th><th>Lng</th><th>☐</th></tr>
+  <tr><td>GCP-1</td><td>Salida pueblo / inicio corredor</td><td></td><td></td><td class="check">☐</td></tr>
+  <tr><td>GCP-2</td><td>Bifurcación principal</td><td></td><td></td><td class="check">☐</td></tr>
+  <tr><td>GCP-3</td><td>Verja / cancela</td><td></td><td></td><td class="check">☐</td></tr>
+  <tr><td>GCP-4</td><td>Entrada casa / destino</td><td></td><td></td><td class="check">☐</td></tr>
+</table>
+
+<h2>3. Durante la captura</h2>
+<table>
+  <tr><th class="check">☐</th><td>Esperar icono <strong>GPS fijo</strong> en GoPro antes de pulsar Timelapse</td></tr>
+  <tr><th class="check">☐</th><td>Caminar <strong>exactamente</strong> el camino que usa la persona ciega (mismo lado, mismas curvas)</td></tr>
+  <tr><th class="check">☐</th><td>Velocidad lenta: ~2–3 km/h (paso pausado)</td></tr>
+  <tr><th class="check">☐</th><td>Solapamiento ≥ 65 % entre fotos (en curvas, ir más despacio)</td></tr>
+  <tr><th class="check">☐</th><td>No incluir pies, sombra del operador ni horizonte en el encuadre</td></tr>
+  <tr><th class="check">☐</th><td>Calles estrechas: pasada central + pasada lateral si es posible</td></tr>
+  <tr><th class="check">☐</th><td>Campo/sendero: <strong>2–3 pasadas</strong> (ida, vuelta, pasada extra en bifurcaciones)</td></tr>
+  <tr><th class="check">☐</th><td>Parar y anotar en nodos críticos (ver sección 4)</td></tr>
+  <tr><th class="check">☐</th><td class="warn">NO cambiar altura de pértiga durante el recorrido</td></tr>
+</table>
+
+<h2>4. Nodos a anotar (para corridor_nodes.json)</h2>
+<table>
+  <tr><th>Tipo</th><th>Descripción</th><th>Lat/Lng anotado</th><th>☐</th></tr>
+  <tr><td>fork</td><td>Bifurcación / cruce de caminos</td><td></td><td class="check">☐</td></tr>
+  <tr><td>gate</td><td>Verja, cancela, portal</td><td></td><td class="check">☐</td></tr>
+  <tr><td>road_cross</td><td>Cruce con calzada / tráfico</td><td></td><td class="check">☐</td></tr>
+  <tr><td>destination</td><td>Casa / destino final</td><td></td><td class="check">☐</td></tr>
+</table>
+
+<h2>5. Tramos del corredor</h2>
+<table>
+  <tr><th>Tramo</th><th>segmentTag</th><th>Capturado</th></tr>
+  <tr><td>Pueblo / calles estrechas</td><td>urban_sidewalk</td><td class="check">☐</td></tr>
+  <tr><td>Salida pueblo → campo</td><td>rural_lane</td><td class="check">☐</td></tr>
+  <tr><td>Tramo arbolado</td><td>wooded</td><td class="check">☐</td></tr>
+  <tr><td>Últimos metros a casa</td><td>rural_lane</td><td class="check">☐</td></tr>
+</table>
+
+<h2>6. Después de la captura</h2>
+<table>
+  <tr><th class="check">☐</th><td>Descargar fotos a PC (carpeta <code>images/</code> para ODM)</td></tr>
+  <tr><th class="check">☐</th><td>Verificar EXIF/GPS en 3 fotos al azar (Lat/Lng presentes)</td></tr>
+  <tr><th class="check">☐</th><td>Procesar en WebODM/ODM con flags: <code>--dtm --dem-resolution 5</code></td></tr>
+  <tr><th class="check">☐</th><td>Digitalizar eje en QGIS → <code>corridor_path.geojson</code></td></tr>
+  <tr><th class="check">☐</th><td>Exportar perfil → <code>corridor_profile.json</code> (alongM, bearingDeg, gradePct, widthM, segmentTag)</td></tr>
+  <tr><th class="check">☐</th><td>Exportar nodos → <code>corridor_nodes.json</code></td></tr>
+  <tr><th class="check">☐</th><td>Copiar bundle a móvil: <code>files/maps/ojen_odm/</code> o incluir en assets Lazaro</td></tr>
+  <tr><th class="check">☐</th><td>Validar en Lazaro DEBUG: ODM score, alongM, pendiente</td></tr>
+</table>
+
+<h2>7. Comandos ODM sugeridos</h2>
+<div class="box">
+<pre>docker run -ti --rm -v /ruta/proyecto:/datasets/code opendronemap/odm \
+  --project-path /datasets --dtm --dem-resolution 5 --orthophoto-resolution 2</pre>
+<p>Iteración rápida: añadir <code>--fast-orthophoto</code> para preview; luego pasada final sin <code>--fast</code>.</p>
+</div>
+
+<h2>8. Datos de la sesión</h2>
+<table>
+  <tr><th>Campo</th><th>Valor</th></tr>
+  <tr><td>Fecha</td><td></td></tr>
+  <tr><td>Operador</td><td></td></tr>
+  <tr><td>Meteorología</td><td></td></tr>
+  <tr><td>Nº fotos</td><td></td></tr>
+  <tr><td>Longitud estimada corredor</td><td></td></tr>
+  <tr><td>Observaciones</td><td></td></tr>
+</table>
+
+<div class="footer">
+  Lazaro AI — Checklist captura GoPro 11 · Corredor Ojén pueblo→casa · OpenDroneMap + bundle offline<br>
+  Generado para uso de campo. Imprime y marca con bolígrafo cada ☐ completado.
+</div>
+
+</body>
+</html>

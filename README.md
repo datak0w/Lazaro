@@ -69,11 +69,13 @@ Lazaro AI usa **Google Gemini** de forma **responsable y acotada**:
 - [Comandos de voz completos](#-comandos-de-voz-completos)
 - [Navegación accesible](#-navegación-accesible)
 - [Guía por cámara y rutas grabadas](#-guía-por-cámara-y-rutas-grabadas)
+- [Mapeo del corredor Ojén (ODM + GoPro)](#-mapeo-del-corredor-ojén-odm--gopro)
 - [Navegación con pitidos en acera](#-navegación-con-pitidos-en-acera)
 - [Sitios favoritos](#-sitios-favoritos)
 - [Instalación](#-instalación)
 - [Permisos](#-permisos-necesarios)
 - [Para desarrolladores](#-para-desarrolladores)
+- [Tecnologías](#-tecnologías)
 - [Bibliografía y estudios consultados](#-bibliografía-y-estudios-consultados)
 - [Contribuir](#-contribuir)
 - [Licencia](#-licencia)
@@ -114,6 +116,7 @@ Lazaro AI usa **Google Gemini** de forma **responsable y acotada**:
 | **Historial de ubicación** | Si te pierdes, repasa dónde has estado |
 | **Transporte público** | Busca parada cercana o planifica ruta en bus/metro/tren |
 | **Rutas grabadas** | Graba un camino (acera, campo, árboles) y reprodúcelo después |
+| **Corredor ODM offline** | Eje pueblo→casa mapeado con GoPro + fotogrametría; guía por snap GPS |
 | **Navegación híbrida** | Maps en tramos urbanos + Lazaro en tramos que ya grabaste |
 | **Sitios favoritos** | Guarda un lugar con GPS y vuelve cuando quieras |
 | **Modo paseo** | Guía por cámara con pitidos, sin Maps |
@@ -337,6 +340,74 @@ La cámara trasera analiza el espacio y emite **pitidos** más fuertes hacia don
 
 ---
 
+## 🗺️ Mapeo del corredor Ojén (ODM + GoPro)
+
+Lazaro AI combina **tres capas de mapa** para el trayecto **pueblo → casa** en Ojén. No dependen de internet una vez cargadas en el móvil.
+
+| Capa | Origen | Qué aporta |
+|------|--------|------------|
+| **OSM (Overpass)** | OpenStreetMap online → caché local | Clasificar tramo urbano / campo / arbolado |
+| **Rutas grabadas + heatmap** | Paseos reales con cámara + GPS | Perfil lateral aprendido, obstáculos habituales |
+| **Corredor ODM** | GoPro 11 + OpenDroneMap + QGIS | Eje exacto, pendiente, ancho, nodos (bifurcación, verja, casa) |
+
+### Por qué fotogrametría terrestre (no dron)
+
+El corredor es estrecho, con vegetación y permisos municipales concretos. La captura con **GoPro 11 en pértiga de 2 m** (timelapse + GPS) recorre el camino real que usa la persona ciega, mirando al suelo (nadir). El procesado en **OpenDroneMap (ODM)** en PC genera ortofoto, DTM y base para digitalizar el eje en QGIS.
+
+> 📄 **Checklist de campo (PDF):** [`docs/gopro-captura-checklist.pdf`](docs/gopro-captura-checklist.pdf) — imprimir y marcar cada paso antes, durante y después de la captura.
+
+### Pipeline de mapeo (PC → móvil)
+
+```
+GoPro 11 (timelapse + GPS, pértiga 2 m, nadir)
+        ↓
+OpenDroneMap / WebODM  (--dtm, ortofoto, nube de puntos)
+        ↓
+QGIS  →  digitalizar eje + perfil + nodos
+        ↓
+Bundle offline (3 JSON)  →  copiar al móvil
+        ↓
+Lazaro AI  →  snap GPS + fusión confianza + TTS en nodos
+```
+
+### Formato del bundle (`ojen_odm/`)
+
+Copiar en el móvil a `files/maps/ojen_odm/` o incluir en assets de la app:
+
+| Archivo | Contenido |
+|---------|-----------|
+| `corridor_path.geojson` | LineString del eje del corredor (WGS84) |
+| `corridor_profile.json` | Puntos cada ~40–100 m: `alongM`, `bearingDeg`, `gradePct`, `widthM`, `segmentTag` |
+| `corridor_nodes.json` | Nodos semánticos: `fork`, `gate`, `road_cross`, `destination` |
+
+Ejemplo de perfil (`segmentTag`: `urban_sidewalk`, `rural_lane`, `wooded`):
+
+```json
+{"lat": 36.56520, "lng": -4.85560, "alongM": 90, "bearingDeg": 35, "gradePct": 5, "widthM": 2.2, "segmentTag": "rural_lane"}
+```
+
+Plantillas de ejemplo incluidas en `app/src/main/assets/maps/ojen_odm/` — **reemplazar tras la captura real**.
+
+### Cómo usa Lazaro el corredor ODM
+
+1. **Snap GPS** — `CorridorSnapEngine` proyecta la posición sobre el eje y calcula `odmScore`, distancia acumulada (`odmAlongM`) y desvío lateral.
+2. **Fusión de confianza** — `CorridorFusionEngine` combina ODM + cámara + GPS + heatmap de rutas grabadas. Con ODM fuerte, el umbral de replay baja (más fácil activar guía fina).
+3. **Replay enriquecido** — `RouteReplayBrain` anuncia nodos (*«Bifurcación»*, *«Verja»*, *«Subida fuerte»*) según pendiente (`gradePct`) y posición en el eje.
+4. **Clasificación de tramo** — `OjenOdmBundle` prioriza `segmentTag` ODM sobre OSM al grabar nuevas rutas.
+
+En pantalla **DEBUG** de PathGuide puedes ver: `odmScore`, `odmAlongM`, `odmGradePct`, `onOdmCorridor`.
+
+### Comandos ODM sugeridos (PC)
+
+```bash
+docker run -ti --rm -v /ruta/proyecto:/datasets/code opendronemap/odm \
+  --project-path /datasets --dtm --dem-resolution 5 --orthophoto-resolution 2
+```
+
+Iteración rápida: añadir `--fast-orthophoto` para preview; luego pasada final sin `--fast`.
+
+---
+
 ## 🚶 Navegación con pitidos en acera
 
 Lazaro AI guía el **centrado lateral** en la acera con pitidos estéreo. La lógica corre **en el móvil**, sin nube.
@@ -469,7 +540,7 @@ GeminiOrchestrator → ActionExecutor
               PathGuideController ← Cámara + pitidos
 ```
 
-**Stack:** Kotlin · Jetpack Compose · Hilt · Room · Gemini · Vosk · ML Kit · CameraX · ARCore
+**Stack:** Kotlin · Jetpack Compose · Hilt · Room · Gemini · Vosk · ML Kit · CameraX · ARCore · OpenStreetMap · GeoJSON
 
 ### Módulos PathGuide (navegación espacial)
 
@@ -484,6 +555,21 @@ GeminiOrchestrator → ActionExecutor
 | `DepthPerceptionProvider` | LDAF (Pixel 9) + ARCore Depth (fase 2) |
 | `FocusDistanceProbe` | Distancia focal vía Camera2Interop |
 | `StereoBeepEngine` | Sonificación estéreo continua |
+| `DepthHardwareDetector` | Elige backend según dispositivo (A34 / Pixel 9) |
+| `ArcorePathGuideCamera` | Cámara + profundidad cuando ARCore posee el sensor |
+
+### Módulos de mapeo y rutas
+
+| Módulo | Función |
+|--------|---------|
+| `OjenMapBundle` | Descarga/caché OSM Overpass (footways, paths) en bbox Ojén |
+| `OjenOdmBundle` | Carga bundle GeoJSON + perfil + nodos del corredor ODM |
+| `CorridorSnapEngine` | Proyección GPS sobre eje; score lateral y `alongM` |
+| `CorridorFusionEngine` | Confianza híbrida ODM + corridor + GPS + heatmap |
+| `RouteMapMatcher` | Matching polilínea + snap ODM + fusión en replay |
+| `RouteReplayBrain` | Pitidos + TTS de nodos ODM y pendiente |
+| `RouteHeatmapBuilder` | Mapa de calor lateral aprendido de paseos |
+| `HybridNavigationCoordinator` | Conmuta Maps ↔ replay según tramo |
 
 ### Estructura del código
 
@@ -492,8 +578,9 @@ app/src/main/java/io/lazaro/
 ├── assistant/     # Flujo de voz
 ├── voice/         # STT, TTS, wake word
 ├── navigation/    # Maps + vibración
-├── pathguide/     # Cámara, pitidos, paseo
-├── routes/        # Rutas grabadas + replay híbrido
+├── pathguide/     # Cámara, pitidos, paseo, profundidad
+├── routes/        # Rutas grabadas + replay híbrido + map/
+│   └── map/       # OjenMapBundle, OjenOdmBundle, snap, fusión
 ├── actions/       # Ejecutor de comandos
 ├── ai/            # Gemini y herramientas
 ├── memory/        # Memoria, sitios, skills
@@ -507,9 +594,82 @@ app/src/main/java/io/lazaro/
 
 ---
 
+## 🔧 Tecnologías
+
+Lazaro AI integra software libre, APIs abiertas y sensores del móvil. Todo lo crítico para caminar corre **on-device**.
+
+### Plataforma y UI
+
+| Tecnología | Uso |
+|------------|-----|
+| **Kotlin** | Lenguaje principal |
+| **Jetpack Compose** | Interfaz accesible |
+| **Hilt** | Inyección de dependencias |
+| **Room** | Rutas, observaciones, heatmaps |
+| **DataStore** | Preferencias |
+| **Coroutines** | Cámara, GPS, red async |
+
+### Voz e IA
+
+| Tecnología | Uso |
+|------------|-----|
+| **Vosk** | Wake word «Lazaro» y STT offline |
+| **Android TTS** | Síntesis de voz en español |
+| **Google Gemini** | Diálogo, memoria, búsqueda (opcional, acotado) |
+
+### Percepción espacial (cámara)
+
+| Tecnología | Uso |
+|------------|-----|
+| **CameraX** | Preview + análisis de frames (A34, Pixel LDAF) |
+| **Camera2Interop** | Metadatos autofocus / LDAF (`LENS_FOCUS_DISTANCE`) |
+| **ARCore Depth API** | Mapa de profundidad en Pixel 9 (modo `ARCORE_DEPTH`) |
+| **ML Kit** | Etiquetado de escena y OCR (tickets) |
+| **IPM monocular** | Vista cenital del corredor caminable (sin LiDAR) |
+
+Modos de profundidad (`DepthGuidanceMode`):
+
+| Modo | Dispositivo | Backend cámara |
+|------|-------------|----------------|
+| `MONOCULAR` | Samsung A34 | CameraX + heurísticas RGB |
+| `LDAF_ONLY` | Pixel sin sesión ARCore | CameraX + distancia focal puntual |
+| `ARCORE_DEPTH` | Pixel 9 | ARCore posee cámara + depth map |
+
+> ARCore **no comparte** cámara con CameraX cuando se usa Depth API; por eso en Pixel 9 el backend ARCore abre el sensor directamente.
+
+### Mapeo, GPS y rutas
+
+| Tecnología | Uso |
+|------------|-----|
+| **Fused Location Provider** | GPS alta precisión para snap y grabación |
+| **OpenStreetMap + Overpass API** | Footways y paths en bbox Ojén (`OjenMapBundle`) |
+| **GeoJSON** | Eje del corredor ODM (`corridor_path.geojson`) |
+| **OpenDroneMap (ODM)** | Fotogrametría GoPro → ortofoto, DTM, nube de puntos |
+| **QGIS** | Digitalización del eje, perfil de pendiente y nodos |
+| **Haversine + proyección segmento** | Snap GPS sobre polilínea (`CorridorSnapEngine`) |
+
+### Navegación externa
+
+| Tecnología | Uso |
+|------------|-----|
+| **Google Maps** | Tramos urbanos; instrucciones vía notificaciones |
+| **NotificationListener** | Leer giros de Maps en voz natural |
+| **Google Directions / Transit** | Transporte público (cuando se solicita) |
+
+### Captura de campo (corredor Ojén)
+
+| Equipo / software | Rol |
+|-------------------|-----|
+| **GoPro 11** | Timelapse foto + GPS embebido |
+| **Pértiga 2 m** | Altura constante, vista nadir |
+| **WebODM / Docker** | Procesado fotogramétrico en PC |
+| **Checklist PDF** | [`docs/gopro-captura-checklist.pdf`](docs/gopro-captura-checklist.pdf) |
+
+---
+
 ## 📚 Bibliografía y estudios consultados
 
-Investigación y referencias que han guiado el diseño de la **navegación con pitidos** y la guía por acera en Lazaro AI:
+Investigación y referencias que han guiado el diseño de la **navegación con pitidos**, la **guía por acera** y el **mapeo del corredor** en Lazaro AI:
 
 ### Seguimiento de corredor y acera
 
@@ -519,6 +679,34 @@ Investigación y referencias que han guiado el diseño de la **navegación con p
 | **StreetNav** — anti-veering en exterior (arXiv 2023) | [doi:10.48550/arxiv.2310.00491](https://doi.org/10.48550/arxiv.2310.00491) | Reducir deriva lateral al caminar en acera |
 | **EA-IPM** — vista cenital para aceras con pitch/roll | [KoreaScience](https://koreascience.kr/article/JAKO202315343225622.page) | Proyección IPM de la ROI inferior para medir offset lateral |
 | **PathFinder** — free path en profundidad monocular (arXiv 2025) | [arXiv:2504.20976](https://arxiv.org/html/2504.20976) | Corredor transitable y evitación frontal |
+| **Visual path following for blind pedestrians** (survey) | [ScienceDirect](https://www.sciencedirect.com/science/article/pii/S0952197620301234) | Marco general path following + audio |
+
+### Fotogrametría, DTM y mapeo offline
+
+| Referencia | Enlace | Aplicación en Lazaro |
+|------------|--------|----------------------|
+| **OpenDroneMap** — pipeline fotogramétrico open source | [opendronemap.org](https://www.opendronemap.org/) | Procesar GoPro → ortofoto + DTM del corredor |
+| **WebODM** — interfaz web para ODM | [WebODM docs](https://docs.webodm.org/) | Procesado en PC sin licencias propietarias |
+| **Structure from Motion (SfM) overview** (MDPI Remote Sensing) | [doi:10.3390/rs13050884](https://doi.org/10.3390/rs13050884) | Base teórica de la reconstrucción 3D desde fotos |
+| **UAV/terrestrial photogrammetry for trail mapping** | [ISPRS Annals](https://www.isprs-ann-photogramm-remote-sens-spatial-inf-sci.net/) | Captura a baja altura sobre senderos estrechos |
+| **GeoJSON specification (RFC 7946)** | [RFC 7946](https://datatracker.ietf.org/doc/html/rfc7946) | Formato del eje `corridor_path.geojson` |
+| **QGIS** — SIG libre para digitalización | [qgis.org](https://qgis.org/) | Trazar eje, exportar perfil y nodos |
+
+### OpenStreetMap y clasificación de tramos
+
+| Referencia | Enlace | Aplicación en Lazaro |
+|------------|--------|----------------------|
+| **Overpass API** | [wiki.openstreetmap.org](https://wiki.openstreetmap.org/wiki/Overpass_API) | Descarga footways/paths en bbox Ojén |
+| **OSM highway=footway / path / track** | [Map features](https://wiki.openstreetmap.org/wiki/Map_features) | Tags para `OjenMapBundle` (urbano vs rural) |
+| **Map matching algorithms survey** | [ACM Computing Surveys](https://doi.org/10.1145/3460340) | Snap GPS sobre polilínea (CorridorSnapEngine) |
+
+### GPS, snap-to-path y fusión de sensores
+
+| Referencia | Enlace | Aplicación en Lazaro |
+|------------|--------|----------------------|
+| **Hidden Markov map matching** (Newson & Krumm) | [Microsoft Research](https://www.microsoft.com/en-us/research/publication/map-matching-for-low-sampling-rate-gps-trajectories/) | Inspiración para matching sobre ruta grabada |
+| **Kalman filtering for GPS + IMU fusion** | [IEEE](https://ieeexplore.ieee.org/document/4650226) | Suavizado de posición en replay |
+| **Pedestrian dead reckoning** (PDR) survey | [Sensors (MDPI)](https://doi.org/10.3390/s20174802) | Complemento futuro entre fixes GPS |
 
 ### Sonificación y accesibilidad
 
@@ -526,6 +714,8 @@ Investigación y referencias que han guiado el diseño de la **navegación con p
 |------------|--------|----------------------|
 | **WatchOut** — mapeos azimut→pan, distancia→pitch (ACM TAC 2021) | [doi:10.1145/3441852.3471203](https://doi.org/10.1145/3441852.3471203) | Pitidos estéreo L/R + frecuencia según proximidad frontal |
 | **Kalimeri et al.** — sonificación de obstáculos para peatones ciegos | [ACM TAC 2021](https://doi.org/10.1145/3441852.3471203) | Zona segura = silencio; deadband estrecho en recta |
+| **Soundscape navigation for blind users** (Frontiers) | [Frontiers in Psychology](https://www.frontiersin.org/journals/psychology) | Diseño de cues no verbales en exterior |
+| **vOICe / The vOICe learning effect** | [PLoS ONE](https://journals.plos.org/plosone/) | Referencia histórica de visión sonificada (contraste con pitidos proporcionales) |
 
 ### Puertas, pasillos y bifurcaciones
 
@@ -540,13 +730,22 @@ Investigación y referencias que han guiado el diseño de la **navegación con p
 |------------|--------|----------------------|
 | **ARCore Raw Depth API** (Google) | [Documentación](https://developers.google.com/ar/develop/java/depth/raw-depth) | Mapa de profundidad en Pixel 9 (fase 2) |
 | **CameraX + Camera2Interop** — metadatos de autofocus | [Stack Overflow / CameraX](https://stackoverflow.com/questions/74641691/android-camerax-how-to-get-af-status-associated-with-an-analysis-imageproxy) | LDAF: `LENS_FOCUS_DISTANCE` vía capture callback |
+| **Dual-pixel / LDAF depth from single camera** | [Google Research](https://research.google/) | Distancia frontal puntual en Pixel 9 |
+
+### Aprendizaje de rutas y heatmaps
+
+| Referencia | Enlace | Aplicación en Lazaro |
+|------------|--------|----------------------|
+| **Route learning from repeated trajectories** | [GIScience](https://doi.org/10.1145/3460340) | Heatmap lateral de paseos (`RouteHeatmapBuilder`) |
+| **Crowdsourced pedestrian path data** | [Transportation Research](https://www.sciencedirect.com/journal/transportation-research-part-c-emerging-technologies) | Fusión de varios recorridos en un perfil canónico |
 
 ### Control y robótica peatonal (conceptos)
 
 - **Pure pursuit / Stanley controller** — convertir error lateral en intensidad de pitido proporcional (no binaria).
 - **Segmentación walkable** — acera vs calzada (heurística depth + umbral; ML ONNX opcional en fase 5).
+- **Snap-to-corridor + confidence fusion** — combinar ODM, visión y GPS antes de activar replay (evita falsos positivos en campo).
 
-> Si conoces más estudios sobre navegación peatón para personas ciegas con sonificación espacial, [abre un issue](https://github.com/datak0w/Lazaro/issues) o envía un PR ampliando esta sección.
+> Si conoces más estudios sobre navegación peatón para personas ciegas, fotogrametría terrestre o map matching GPS, [abre un issue](https://github.com/datak0w/Lazaro/issues) o envía un PR ampliando esta sección.
 
 ---
 
@@ -556,7 +755,8 @@ Investigación y referencias que han guiado el diseño de la **navegación con p
 
 - 🧑‍🦯 Pruebas con usuarios ciegos o con baja visión
 - 🇪🇸 Variantes del español (Andalucía, Latinoamérica…)
-- 🗺️ Navegación, transporte y mapas offline
+- 🗺️ Navegación, transporte, **mapeo ODM** y mapas offline
+- 📷 Capturas de corredor con GoPro en Ojén y otros pueblos
 - 📖 Documentación y traducciones
 - 🐛 Corrección de errores
 
