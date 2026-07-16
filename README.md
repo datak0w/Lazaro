@@ -25,6 +25,8 @@
 
 Nació en la **Villa de Ojén** (Málaga, Andalucía) para cubrir las necesidades reales de un **amigo pintor**, hoy **invidente**. No es un producto de una gran empresa ni un experimento de laboratorio: es una herramienta de barrio, hecha con cariño, para que una persona pueda **moverse, comunicarse y vivir con más autonomía** sin depender de interfaces visuales.
 
+Parte de ese trabajo pasa por **cartografiar el pueblo a pie**: hemos recorrido Ojén con una **GoPro 11** (fotos en timelapse + **GPS en cada imagen**) montada en pértiga, mirando al suelo. Esas capturas se procesan en PC con **fotogrametría 3D** (OpenDroneMap) para obtener ortofotos, modelos del terreno y un mapa mucho más fiel que el que suele existir para peatones ciegos. El objetivo no es hacer un mapa bonito: es **hacer la ciudad más accesible** — saber dónde está la acera, cuánto mide un paso, dónde sube el camino, dónde hay una verja o una bifurcación — y llevar esos datos **offline al móvil**, sin depender de internet ni de servicios de pago.
+
 > **Lazaro AI** combina voz local (rápida y sin gastar datos) con inteligencia artificial **solo donde aporta valor**: recordar cosas, entender frases raras o buscar información. **Nunca** te guía en tiempo real por una nube: la seguridad al caminar la llevan el GPS, la cámara y el cerebro del móvil.
 
 ---
@@ -69,7 +71,7 @@ Lazaro AI usa **Google Gemini** de forma **responsable y acotada**:
 - [Comandos de voz completos](#-comandos-de-voz-completos)
 - [Navegación accesible](#-navegación-accesible)
 - [Guía por cámara y rutas grabadas](#-guía-por-cámara-y-rutas-grabadas)
-- [Mapeo del corredor Ojén (ODM + GoPro)](#-mapeo-del-corredor-ojén-odm--gopro)
+- [Mapeo de Ojén (GoPro 11 + GPS + 3D)](#-mapeo-de-ojén-gopro-11--gps--3d)
 - [Navegación con pitidos en acera](#-navegación-con-pitidos-en-acera)
 - [Sitios favoritos](#-sitios-favoritos)
 - [Instalación](#-instalación)
@@ -116,7 +118,7 @@ Lazaro AI usa **Google Gemini** de forma **responsable y acotada**:
 | **Historial de ubicación** | Si te pierdes, repasa dónde has estado |
 | **Transporte público** | Busca parada cercana o planifica ruta en bus/metro/tren |
 | **Rutas grabadas** | Graba un camino (acera, campo, árboles) y reprodúcelo después |
-| **Corredor ODM offline** | Eje pueblo→casa mapeado con GoPro + fotogrametría; guía por snap GPS |
+| **Corredor ODM offline** | Modelo 3D del entorno (GoPro + fotogrametría); guía por snap GPS |
 | **Navegación híbrida** | Maps en tramos urbanos + Lazaro en tramos que ya grabaste |
 | **Sitios favoritos** | Guarda un lugar con GPS y vuelve cuando quieras |
 | **Modo paseo** | Guía por cámara con pitidos, sin Maps |
@@ -340,21 +342,48 @@ La cámara trasera analiza el espacio y emite **pitidos** más fuertes hacia don
 
 ---
 
-## 🗺️ Mapeo del corredor Ojén (ODM + GoPro)
+## 🗺️ Mapeo de Ojén (GoPro 11 + GPS + 3D)
 
-Lazaro AI combina **tres capas de mapa** para el trayecto **pueblo → casa** en Ojén. No dependen de internet una vez cargadas en el móvil.
+### Cartografiar el pueblo a pie para hacerlo más accesible
+
+Google Maps ayuda en la calle principal, pero **no conoce el camino real** que usa una persona ciega: la acera estrecha, el atajo entre muros, el tramo de tierra con árboles, la verja que hay que encontrar a tiento. En Ojén estamos construyendo esa capa que falta.
+
+**Cómo lo hacemos:**
+
+1. **Paseamos el pueblo** con GoPro 11 en timelapse, GPS activo, cámara hacia abajo (vista cenital del suelo).
+2. Cada foto lleva **coordenadas GPS** en el EXIF — un rastro georreferenciado del corredor peatonal real.
+3. En PC, **OpenDroneMap** reconstruye en 3D el entorno: ortofoto, nube de puntos, modelo digital del terreno (DTM).
+4. En **QGIS** digitalizamos el eje del camino, la pendiente, el ancho y los puntos importantes (bifurcaciones, verjas, cruces, casa).
+5. Exportamos un **bundle offline** (GeoJSON + JSON) que Lazaro carga en el móvil — **sin internet**, **sin cuota**, **sin depender de nadie**.
+
+Así convertimos un paseo físico por Ojén en **datos 3D del entorno** que la app usa para guiar con pitidos, avisos de voz (*«subida fuerte»*, *«verja»*, *«bifurcación»*) y rutas grabadas. Es cartografía hecha **desde la perspectiva del peatón ciego**, no desde un satélite o un coche.
+
+> 📄 **Checklist de campo (PDF):** [`docs/gopro-captura-checklist.pdf`](docs/gopro-captura-checklist.pdf) — guía paso a paso para repetir o ampliar capturas.
+
+### Tres capas de mapa en el móvil
+
+Lazaro combina **tres fuentes** para el trayecto **pueblo → casa** (y, a futuro, más tramos del municipio). Una vez cargadas, **no necesitan internet**:
 
 | Capa | Origen | Qué aporta |
 |------|--------|------------|
 | **OSM (Overpass)** | OpenStreetMap online → caché local | Clasificar tramo urbano / campo / arbolado |
 | **Rutas grabadas + heatmap** | Paseos reales con cámara + GPS | Perfil lateral aprendido, obstáculos habituales |
-| **Corredor ODM** | GoPro 11 + OpenDroneMap + QGIS | Eje exacto, pendiente, ancho, nodos (bifurcación, verja, casa) |
+| **Corredor ODM** | GoPro 11 + OpenDroneMap + QGIS | Modelo 3D del entorno, eje exacto, pendiente, ancho, nodos |
 
-### Por qué fotogrametría terrestre (no dron)
+### Qué aporta el modelo 3D a la accesibilidad
 
-El corredor es estrecho, con vegetación y permisos municipales concretos. La captura con **GoPro 11 en pértiga de 2 m** (timelapse + GPS) recorre el camino real que usa la persona ciega, mirando al suelo (nadir). El procesado en **OpenDroneMap (ODM)** en PC genera ortofoto, DTM y base para digitalizar el eje en QGIS.
+| Dato 3D / vectorial | Para qué sirve a la persona ciega |
+|---------------------|-------------------------------------|
+| **Ortofoto de alta resolución** | Ver bordes de acera, escalones y obstáculos fijos al digitalizar |
+| **DTM (terreno)** | Detectar **subidas y bajadas** antes de llegar — aviso *«subida fuerte»* |
+| **Eje del corredor (GeoJSON)** | Saber si vas **en el camino correcto** aunque el GPS se desvíe un poco |
+| **Ancho del paso (`widthM`)** | Ajustar cuánta deriva lateral se tolera antes de avisar |
+| **Nodos semánticos** | Anunciar **bifurcaciones, verjas, cruces y destino** por voz |
+| **Bundle offline** | Funciona en el campo sin cobertura — crucial en tramos rurales de Ojén |
 
-> 📄 **Checklist de campo (PDF):** [`docs/gopro-captura-checklist.pdf`](docs/gopro-captura-checklist.pdf) — imprimir y marcar cada paso antes, durante y después de la captura.
+### Por qué fotogrametría terrestre a pie (no dron)
+
+El corredor es estrecho, con vegetación y permisos municipales concretos. Un dron no ve bien debajo de los árboles ni captura el **camino exacto** que pisa una persona con bastón. Caminar con **GoPro 11 en pértiga de 2 m** (timelapse + GPS, vista nadir) registra **el mismo recorrido** que hará el usuario invidente. El procesado en **OpenDroneMap (ODM)** genera la base 3D; **QGIS** extrae el eje navegable.
 
 ### Pipeline de mapeo (PC → móvil)
 
@@ -656,14 +685,17 @@ Modos de profundidad (`DepthGuidanceMode`):
 | **NotificationListener** | Leer giros de Maps en voz natural |
 | **Google Directions / Transit** | Transporte público (cuando se solicita) |
 
-### Captura de campo (corredor Ojén)
+### Captura de campo (cartografía de Ojén)
 
 | Equipo / software | Rol |
 |-------------------|-----|
-| **GoPro 11** | Timelapse foto + GPS embebido |
-| **Pértiga 2 m** | Altura constante, vista nadir |
-| **WebODM / Docker** | Procesado fotogramétrico en PC |
+| **GoPro 11** | Timelapse foto + GPS embebido en cada imagen |
+| **Pértiga 2 m** | Altura constante, vista nadir del suelo peatonal |
+| **OpenDroneMap / WebODM** | Reconstrucción 3D: ortofoto, nube de puntos, DTM |
+| **QGIS** | Digitalizar eje, pendiente, nodos de accesibilidad |
 | **Checklist PDF** | [`docs/gopro-captura-checklist.pdf`](docs/gopro-captura-checklist.pdf) |
+
+El objetivo a largo plazo: **mapear progresivamente Ojén** — calles, plazas, senderos — y convertir cada captura en capas offline que mejoren la autonomía de personas ciegas en el municipio.
 
 ---
 
@@ -755,8 +787,8 @@ Investigación y referencias que han guiado el diseño de la **navegación con p
 
 - 🧑‍🦯 Pruebas con usuarios ciegos o con baja visión
 - 🇪🇸 Variantes del español (Andalucía, Latinoamérica…)
-- 🗺️ Navegación, transporte, **mapeo ODM** y mapas offline
-- 📷 Capturas de corredor con GoPro en Ojén y otros pueblos
+- 🗺️ Navegación, transporte, **mapeo 3D de Ojén** y mapas offline
+- 📷 Capturas con GoPro en calles y senderos del municipio
 - 📖 Documentación y traducciones
 - 🐛 Corrección de errores
 
