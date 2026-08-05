@@ -30,6 +30,7 @@ class NavigationGuidanceMonitor @Inject constructor(
     private var lastAnnounced: String? = null
     private var lastAnnouncedMs = 0L
     private var lastActionTip: String? = null
+    private var lastMapsHeardMs = 0L
     private var speakingMaps = false
 
     fun startNavigation() {
@@ -39,6 +40,7 @@ class NavigationGuidanceMonitor @Inject constructor(
         lastAnnounced = null
         lastAnnouncedMs = 0L
         lastActionTip = null
+        lastMapsHeardMs = 0L
     }
 
     fun stopNavigation() {
@@ -49,6 +51,7 @@ class NavigationGuidanceMonitor @Inject constructor(
         lastAnnounced = null
         lastAnnouncedMs = 0L
         lastActionTip = null
+        lastMapsHeardMs = 0L
         textToSpeechManager.stop()
     }
 
@@ -59,6 +62,12 @@ class NavigationGuidanceMonitor @Inject constructor(
     }
 
     fun lastActionTip(): String? = lastActionTip
+
+    /** True si Maps anunció hace menos de [withinMs] (la guía propia debe callar). */
+    fun hasHeardMapsRecently(withinMs: Long): Boolean {
+        if (lastMapsHeardMs <= 0L) return false
+        return System.currentTimeMillis() - lastMapsHeardMs < withinMs
+    }
 
     fun onMapsNotification(extras: Bundle) {
         if (!active.get()) return
@@ -83,6 +92,7 @@ class NavigationGuidanceMonitor @Inject constructor(
         // Evitar repetir el mismo tip de acción en ráfaga (Maps spamea notifs)
         if (tip == lastActionTip && System.currentTimeMillis() - lastAnnouncedMs < MIN_SAME_TIP_MS) {
             lastAnnounced = instruction
+            lastMapsHeardMs = System.currentTimeMillis()
             return
         }
 
@@ -91,6 +101,7 @@ class NavigationGuidanceMonitor @Inject constructor(
 
         lastAnnounced = instruction
         lastAnnouncedMs = now
+        lastMapsHeardMs = now
         lastActionTip = tip
 
         scope.launch {

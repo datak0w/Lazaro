@@ -69,4 +69,16 @@ class BlindNavigationPhraseBuilderTest {
                 .startsWith("Camina hacia adelante."),
         )
     }
+
+    @Test
+    fun initialHeadingIncludesDestination() {
+        val tip = BlindNavigationPhraseBuilder.announceInitialHeading(
+            BlindNavigationPhraseBuilder.Action.TURN_RIGHT,
+            80,
+            "Bar Castillo Solis",
+        )
+        assertTrue(tip.contains("Bar Castillo Solis"))
+        assertTrue(tip.contains("derecha"))
+        assertTrue(tip.contains("80"))
+    }
 }

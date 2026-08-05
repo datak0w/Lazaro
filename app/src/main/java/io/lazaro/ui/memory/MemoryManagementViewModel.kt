@@ -13,6 +13,7 @@ import io.lazaro.cane.ble.CaneBleManager
 import io.lazaro.cane.ble.CaneHandshakeCapture
 import io.lazaro.sensor.PiHubBleManager
 import io.lazaro.sensor.PiHubRepository
+import io.lazaro.pathguide.PathGuideRepository
 import io.lazaro.memory.MemoryRepository
 import io.lazaro.memory.entity.CustomSkill
 import io.lazaro.memory.entity.LocationRecord
@@ -56,6 +57,7 @@ data class MemoryManagementUiState(
     val distanceAlertsEnabled: Boolean = true,
     val visionAutoIntervalSec: Int = 0,
     val visionTtsEnabled: Boolean = true,
+    val harnessMountMode: Boolean = false,
 )
 
 @HiltViewModel
@@ -70,6 +72,7 @@ class MemoryManagementViewModel @Inject constructor(
     private val handshakeCapture: CaneHandshakeCapture,
     private val piHubBleManager: PiHubBleManager,
     private val piHubRepository: PiHubRepository,
+    private val pathGuideRepository: PathGuideRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MemoryManagementUiState())
@@ -90,7 +93,8 @@ class MemoryManagementViewModel @Inject constructor(
                 combine(piHubRepository.config, piHubBleManager.state) { hubConfig, hubState ->
                     HubSnapshot(hubConfig, hubState)
                 },
-            ) { cane, hub ->
+                pathGuideRepository.config,
+            ) { cane, hub, pathGuide ->
                 _uiState.value = _uiState.value.copy(
                     caneMac = cane.config.savedMac,
                     caneName = cane.config.savedName,
@@ -109,8 +113,23 @@ class MemoryManagementViewModel @Inject constructor(
                     distanceAlertsEnabled = hub.config.distanceAlertsEnabled,
                     visionAutoIntervalSec = hub.config.visionAutoIntervalSec,
                     visionTtsEnabled = hub.config.visionTtsEnabled,
+                    harnessMountMode = pathGuide.harnessMountMode,
                 )
             }.collect { }
+        }
+    }
+
+    fun setHarnessMountMode(enabled: Boolean) {
+        viewModelScope.launch {
+            pathGuideRepository.setHarnessMountMode(enabled)
+            _uiState.value = _uiState.value.copy(
+                harnessMountMode = enabled,
+                statusMessage = if (enabled) {
+                    "Modo arnés activado"
+                } else {
+                    "Modo arnés desactivado"
+                },
+            )
         }
     }
 

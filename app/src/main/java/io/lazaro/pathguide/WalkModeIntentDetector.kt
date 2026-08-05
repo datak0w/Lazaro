@@ -7,6 +7,8 @@ import javax.inject.Singleton
 enum class WalkIntent {
     START,
     STOP,
+    ENABLE_HARNESS,
+    DISABLE_HARNESS,
 }
 
 @Singleton
@@ -15,6 +17,8 @@ class WalkModeIntentDetector @Inject constructor() {
     fun detect(userText: String): WalkIntent? {
         val text = normalize(userText)
         if (text.isBlank()) return null
+        if (matchesAny(text, DISABLE_HARNESS_TRIGGERS)) return WalkIntent.DISABLE_HARNESS
+        if (matchesAny(text, ENABLE_HARNESS_TRIGGERS)) return WalkIntent.ENABLE_HARNESS
         if (matchesAny(text, STOP_TRIGGERS)) return WalkIntent.STOP
         if (matchesAny(text, START_TRIGGERS)) return WalkIntent.START
         return null
@@ -53,6 +57,23 @@ class WalkModeIntentDetector @Inject constructor() {
             "salir del paseo",
             "finalizar paseo",
             "acabar paseo",
+        )
+
+        private val ENABLE_HARNESS_TRIGGERS = listOf(
+            "modo arnes",
+            "activar arnes",
+            "activar modo arnes",
+            "telefono en arnes",
+            "montar telefono",
+            "clip de pecho",
+            "arnes de pecho",
+        )
+
+        private val DISABLE_HARNESS_TRIGGERS = listOf(
+            "desactivar arnes",
+            "desactivar modo arnes",
+            "quitar arnes",
+            "sin arnes",
         )
     }
 }

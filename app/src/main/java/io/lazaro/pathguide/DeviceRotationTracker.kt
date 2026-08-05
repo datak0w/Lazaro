@@ -15,9 +15,12 @@ class DeviceRotationTracker @Inject constructor(
 ) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val rotationSensor =
+    private val absoluteRotationSensor =
         sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+    private val rotationSensor =
+        absoluteRotationSensor
             ?: sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+    private val hasAbsoluteNorth: Boolean = absoluteRotationSensor != null
 
     private val rotationMatrix = FloatArray(9)
     private val orientation = FloatArray(3)
@@ -26,6 +29,9 @@ class DeviceRotationTracker @Inject constructor(
     private var baselineYawRad = 0f
     private var hasBaseline = false
     private var listening = false
+    private var lastYawSampleRad = 0f
+    private var lastYawSampleMs = 0L
+    private var yawRateDegPerSec = 0f
 
     val isAvailable: Boolean
         get() = rotationSensor != null
@@ -38,6 +44,8 @@ class DeviceRotationTracker @Inject constructor(
             SensorManager.SENSOR_DELAY_GAME,
         )
         listening = true
+        lastYawSampleMs = 0L
+        yawRateDegPerSec = 0f
     }
 
     fun stop() {
@@ -45,6 +53,8 @@ class DeviceRotationTracker @Inject constructor(
         sensorManager.unregisterListener(this)
         listening = false
         hasBaseline = false
+        lastYawSampleMs = 0L
+        yawRateDegPerSec = 0f
     }
 
     fun markBaseline() {
@@ -66,10 +76,38 @@ class DeviceRotationTracker @Inject constructor(
         return Math.toDegrees(currentYawRad.toDouble()).toFloat()
     }
 
+    /**
+     * Rumbo absoluto 0–360° (norte magnético) si el sensor es ROTATION_VECTOR.
+     * GAME_ROTATION_VECTOR no tiene referencia a norte → null.
+     */
+    fun compassHeadingDeg(): Float? {
+        if (!hasAbsoluteNorth) return null
+        if (!listening) return null
+        var deg = Math.toDegrees(currentYawRad.toDouble()).toFloat()
+        deg = (deg + 360f) % 360f
+        return deg
+    }
+
+    /** Velocidad de giro en °/s (EMA). Positivo/negativo según yaw del sensor. */
+    fun yawRateDegPerSec(): Float = yawRateDegPerSec
+
     override fun onSensorChanged(event: SensorEvent) {
         SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
         SensorManager.getOrientation(rotationMatrix, orientation)
         currentYawRad = orientation[0]
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastYawSampleMs > 0L) {
+            val dtSec = (now - lastYawSampleMs) / 1000f
+            if (dtSec in 0.008f..0.25f) {
+                val deltaDeg = Math.toDegrees(
+                    normalizeRadians(currentYawRad - lastYawSampleRad).toDouble(),
+                ).toFloat()
+                val instant = deltaDeg / dtSec
+                yawRateDegPerSec = yawRateDegPerSec * 0.72f + instant * 0.28f
+            }
+        }
+        lastYawSampleRad = currentYawRad
+        lastYawSampleMs = now
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit

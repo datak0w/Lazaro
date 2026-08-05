@@ -58,6 +58,35 @@ object BlindNavigationPhraseBuilder {
         Action.OTHER -> "Sigue la indicación de Maps."
     }
 
+    /** Primera indicación propia al arrancar (Maps aún no ha hablado). */
+    fun announceInitialHeading(
+        action: Action,
+        distanceM: Int,
+        label: String,
+    ): String {
+        val name = label.trim().ifBlank { "tu destino" }
+        val parts = mutableListOf("Para llegar a $name: ${primaryTip(action).trimEnd('.')}.")
+        distancePhrase(distanceM)?.let { parts.add(it) }
+        return parts.joinToString(" ").trim()
+    }
+
+    /** Tip de seguimiento propio (sin dependencia de Maps). */
+    fun announceOwnGuidance(action: Action, distanceM: Int): String {
+        val parts = mutableListOf(primaryTip(action))
+        distancePhrase(distanceM)?.let { parts.add(it) }
+        return parts.joinToString(" ").trim()
+    }
+
+    private fun distancePhrase(meters: Int): String? {
+        return when {
+            meters in 5..15 -> "En unos pocos pasos."
+            meters in 16..40 -> "En unos $meters metros."
+            meters in 41..400 -> "Está a unos $meters metros."
+            meters > 400 -> "Está a unos ${meters / 10 * 10} metros."
+            else -> null
+        }
+    }
+
     /**
      * Anuncio completo al llegar un aviso de Maps:
      * 1) acción clara Lazaro

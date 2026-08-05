@@ -50,11 +50,12 @@ class TextToSpeechManager @Inject constructor(
     }
 
     suspend fun speak(text: String): Boolean {
-        if (!isReady || text.isBlank()) return false
+        val spoken = SpokenTextCleaner.forSpeech(text)
+        if (!isReady || spoken.isBlank()) return false
         stopRequested.set(false)
         return suspendCoroutine { continuation ->
             val utteranceId = "lazaro-${System.currentTimeMillis()}"
-            val result = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            val result = tts?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
             if (result == TextToSpeech.ERROR) {
                 _isSpeaking.value = false
                 continuation.resume(false)

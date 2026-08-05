@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,6 +81,11 @@ fun AssistantScreen(
             return
         }
         permissionLauncher.launch(viewModel.requiredPermissions())
+    }
+
+    // Sin el FGS del asistente no se mapean los botones del bastón.
+    LaunchedEffect(Unit) {
+        requestPermissionsAndStart()
     }
 
     Scaffold(

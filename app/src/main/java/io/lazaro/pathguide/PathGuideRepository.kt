@@ -33,11 +33,24 @@ class PathGuideRepository @Inject constructor(
             sceneDescriptionsEnabled = prefs[KEY_SCENE] ?: true,
             sceneDescriptionIntervalSec = prefs[KEY_SCENE_INTERVAL] ?: 30,
             depthEnhancedGuidance = prefs[KEY_DEPTH] ?: true,
+            harnessMountMode = prefs[KEY_HARNESS] ?: false,
         )
     }
 
     suspend fun setEnabled(enabled: Boolean) {
         dataStore.edit { it[KEY_ENABLED] = enabled }
+    }
+
+    suspend fun setDepthEnhancedGuidance(enabled: Boolean) {
+        dataStore.edit { it[KEY_DEPTH] = enabled }
+    }
+
+    suspend fun setHarnessMountMode(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_HARNESS] = enabled
+            // Arnés implica querer profundidad si el hardware la tiene.
+            if (enabled) prefs[KEY_DEPTH] = true
+        }
     }
 
     companion object {
@@ -50,5 +63,6 @@ class PathGuideRepository @Inject constructor(
         private val KEY_SCENE = booleanPreferencesKey("scene_descriptions_enabled")
         private val KEY_SCENE_INTERVAL = intPreferencesKey("scene_description_interval_sec")
         private val KEY_DEPTH = booleanPreferencesKey("depth_enhanced_guidance")
+        private val KEY_HARNESS = booleanPreferencesKey("harness_mount_mode")
     }
 }

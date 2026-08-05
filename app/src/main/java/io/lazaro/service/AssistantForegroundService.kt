@@ -64,8 +64,8 @@ class AssistantForegroundService : Service() {
         NotificationChannels.create(this)
         assistantController.bind(serviceScope)
         serviceScope.launch {
-            caneTriggerBridge.triggers.collect {
-                assistantController.interruptAndListen()
+            caneTriggerBridge.triggers.collect { action ->
+                assistantController.handleCaneButton(action)
             }
         }
         serviceScope.launch {

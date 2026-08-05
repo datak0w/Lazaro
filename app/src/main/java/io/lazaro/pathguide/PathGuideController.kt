@@ -93,6 +93,7 @@ class PathGuideController @Inject constructor(
     private var lastWalkableConfidence: Float = 0f
     private var lastDepthGuidanceMode: DepthGuidanceMode = DepthGuidanceMode.MONOCULAR
     private var lastDeviceLabel: String = ""
+    private var lastHarnessMountMode: Boolean = false
     private var lastPerceptionSource: PerceptionSource = PerceptionSource.MONOCULAR
     private var lastFrontalDistanceM: Float? = null
     private var lastMapsInstructionType: MapsInstructionType = MapsInstructionType.OTHER
@@ -170,16 +171,27 @@ class PathGuideController @Inject constructor(
             mode == PathGuideMode.RUTA ||
             mode == PathGuideMode.DEBUG ||
             mode == PathGuideMode.GRABANDO
-        val depthCaps = depthHardwareDetector.detect(streetMode && config.depthEnhancedGuidance)
+        // Paseo y navegación: arnés automático (Pixel en clip/POV + profundidad).
+        val autoHarness = mode == PathGuideMode.PASEO || mode == PathGuideMode.NAVEGACION
+        if (autoHarness && !config.harnessMountMode) {
+            repository.setHarnessMountMode(true)
+            config = config.copy(harnessMountMode = true, depthEnhancedGuidance = true)
+        }
+        val harnessActive = config.harnessMountMode || autoHarness
+        // Modo arnés: siempre pedir profundidad (ARCore/LDAF si el hardware la tiene).
+        val depthWanted = streetMode && (config.depthEnhancedGuidance || harnessActive)
+        depthHardwareDetector.invalidateCache()
+        val depthCaps = depthHardwareDetector.detect(depthWanted)
         lastDepthGuidanceMode = depthCaps.mode
         lastDeviceLabel = depthCaps.deviceLabel
+        lastHarnessMountMode = harnessActive
         outdoorNavigationBrain.configureDepth(depthCaps, streetMode)
         deviceRotationTracker.start()
         stereoBeepEngine.start()
 
         foregroundBridge.promoteCameraForeground(includeCamera = true)
 
-        val started = pathGuideCameraHost.start(streetMode && config.depthEnhancedGuidance)
+        val started = pathGuideCameraHost.start(depthWanted)
         if (!started) {
             stop()
             return false
@@ -568,6 +580,7 @@ class PathGuideController @Inject constructor(
                 perceptionSource = lastPerceptionSource,
                 depthGuidanceMode = lastDepthGuidanceMode,
                 deviceLabel = lastDeviceLabel,
+                harnessMountMode = lastHarnessMountMode,
                 frontalDistanceM = lastFrontalDistanceM,
                 updatedAtMs = now,
             )

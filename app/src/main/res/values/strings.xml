@@ -40,6 +40,7 @@
     <string name="enable_accessibility">Activar accesibilidad</string>
     <string name="connect_cane">Conectar bastón WeWALK</string>
     <string name="cane_section_title">Bastón WeWALK</string>
+    <string name="cane_buttons_hint">Botones P2P: centro=hablar, abajo=cancelar, arriba=dónde estoy, vol±=volumen</string>
     <string name="cane_connected">Conectado: %1$s</string>
     <string name="cane_disconnected">Sin bastón conectado</string>
     <string name="cane_battery">Batería: %1$d%%</string>
@@ -103,4 +104,8 @@
     <string name="hub_interval_manual">Manual</string>
     <string name="hub_vision_tts_on">Voz de escena: activada</string>
     <string name="hub_vision_tts_off">Voz de escena: desactivada</string>
+    <string name="harness_section_title">Modo arnés (Pixel POV)</string>
+    <string name="harness_section_description">En paseo y navegación se activa solo. Teléfono en clip o arnés de pecho, cámara al frente. En Pixel usa profundidad ARCore.</string>
+    <string name="harness_toggle_on">Modo arnés: activado</string>
+    <string name="harness_toggle_off">Modo arnés: desactivado</string>
 </resources>

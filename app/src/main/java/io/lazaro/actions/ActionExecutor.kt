@@ -10,8 +10,10 @@ import io.lazaro.memory.entity.CustomSkill
 import io.lazaro.memory.SkillExecutor
 import io.lazaro.messaging.WhatsAppReplyAction
 import io.lazaro.navigation.NavigationSessionManager
+import io.lazaro.navigation.NavigationTarget
 import io.lazaro.news.NewsReaderAction
 import io.lazaro.receipt.ReceiptCheckerAction
+import io.lazaro.tools.BatteryAction
 import io.lazaro.tools.CalculatorAction
 import io.lazaro.tools.TimeAction
 import io.lazaro.tools.WeatherAction
@@ -43,6 +45,7 @@ class ActionExecutor @Inject constructor(
     private val newsReaderAction: NewsReaderAction,
     private val weatherAction: WeatherAction,
     private val timeAction: TimeAction,
+    private val batteryAction: BatteryAction,
     private val calculatorAction: CalculatorAction,
     private val receiptCheckerAction: ReceiptCheckerAction,
     private val mapsLaunchDeferrer: MapsLaunchDeferrer,
@@ -60,12 +63,21 @@ class ActionExecutor @Inject constructor(
     private var pendingConfirmation: PendingAction? = null
     private var pendingSkill: CustomSkill? = null
     private var lastPromptText: String = ""
+    private var pendingNavigationTarget: NavigationTarget? = null
 
     fun hasDeferredMapsLaunch(): Boolean = mapsLaunchDeferrer.hasDeferred()
 
     suspend fun runDeferredMapsLaunch(): Boolean {
         return mapsLaunchDeferrer.runDeferred()
     }
+
+    fun consumePendingNavigationTarget(): NavigationTarget? {
+        val t = pendingNavigationTarget
+        pendingNavigationTarget = null
+        return t
+    }
+
+    fun peekPendingNavigationTarget(): NavigationTarget? = pendingNavigationTarget
 
     private fun deferMapsLaunch(launch: suspend () -> Boolean) {
         mapsLaunchDeferrer.defer(launch)
@@ -168,6 +180,10 @@ class ActionExecutor @Inject constructor(
         return timeAction.tryPrepare(userText)
     }
 
+    fun tryHandleBatteryIntent(userText: String): ActionResult? {
+        return batteryAction.tryPrepare(userText)
+    }
+
     fun tryHandleCalculatorIntent(userText: String): ActionResult? {
         return calculatorAction.tryPrepare(userText)
     }
@@ -178,8 +194,19 @@ class ActionExecutor @Inject constructor(
 
     suspend fun tryHandleWalkIntent(userText: String): ActionResult? {
         return when (walkModeIntentDetector.detect(userText)) {
-            WalkIntent.START -> walkModeAction.start()
-            WalkIntent.STOP -> walkModeAction.stop()
+            WalkIntent.START -> {
+                val result = walkModeAction.start()
+                if (result is ActionResult.Success) {
+                    activeSessionTracker.start(ActiveSessionKind.WALK, "paseo")
+                }
+                result
+            }
+            WalkIntent.STOP -> {
+                activeSessionTracker.clear()
+                walkModeAction.stop()
+            }
+            WalkIntent.ENABLE_HARNESS -> walkModeAction.setHarnessMountMode(true)
+            WalkIntent.DISABLE_HARNESS -> walkModeAction.setHarnessMountMode(false)
             null -> null
         }
     }
@@ -388,6 +415,12 @@ class ActionExecutor @Inject constructor(
                 activeSessionTracker.clear()
                 walkModeAction.stop()
             }
+            ToolName.SetHarnessMountMode -> {
+                val raw = args["enabled"].orEmpty().lowercase()
+                val enabled = raw == "true" || raw == "1" || raw == "sí" || raw == "si" ||
+                    raw == "on" || raw == "activar" || raw == "activado"
+                walkModeAction.setHarnessMountMode(enabled)
+            }
             ToolName.ListSavedRoutes -> listSavedRoutes()
             ToolName.ListSavedPlaces -> listSavedPlaces()
             ToolName.ResumeActiveSession -> resumeActiveSession()
@@ -490,6 +523,11 @@ class ActionExecutor @Inject constructor(
                     pathGuideController.stop()
                 }
                 val location = locationAction.getCurrentLocation()
+                pendingNavigationTarget = NavigationTarget(
+                    label = destination,
+                    latitude = lat,
+                    longitude = lng,
+                )
                 deferMapsLaunch {
                     if (lat != null && lng != null) {
                         navigationAction.launchWalkingNavigationToCoordinates(
@@ -508,9 +546,7 @@ class ActionExecutor @Inject constructor(
                     }
                 }
                 ActionResult.Success(
-                    "Vale, te guío a pie hasta $destination. " +
-                        "Abro Google Maps: Lazaro leerá cada giro y la cámara te guiará con pitidos. " +
-                        "Los avisos de ruta tienen prioridad. Di Lazaro si necesitas algo.",
+                    "Vale, te guío a pie hasta $destination.",
                     suspendListening = true,
                 )
             }
@@ -538,6 +574,11 @@ class ActionExecutor @Inject constructor(
                     ActionResult.Error("No tengo la parada lista.")
                 } else {
                     val location = locationAction.getCurrentLocation()
+                    pendingNavigationTarget = NavigationTarget(
+                        label = stopName,
+                        latitude = lat,
+                        longitude = lng,
+                    )
                     deferMapsLaunch {
                         navigationAction.launchWalkingNavigationToCoordinates(
                             lat,
@@ -548,7 +589,7 @@ class ActionExecutor @Inject constructor(
                         )
                     }
                     ActionResult.Success(
-                        "Te guío a pie hasta $stopName. Lazaro te dira cada giro y vibrara al girar.",
+                        "Te guío a pie hasta $stopName.",
                         suspendListening = true,
                     )
                 }
@@ -562,8 +603,7 @@ class ActionExecutor @Inject constructor(
                     navigationAction.launchTransitRoute(destination, originLat, originLng)
                 }
                 ActionResult.Success(
-                    "Abro la ruta en transporte público hasta $destination. " +
-                        "Me callo mientras usas Maps. Di Lazaro o toca cuando quieras.",
+                    "Abro la ruta en transporte público hasta $destination.",
                     suspendListening = true,
                 )
             }
@@ -576,6 +616,7 @@ class ActionExecutor @Inject constructor(
         val wasResume = pending?.toolName == ToolName.ResumeActiveSession.id
         pendingConfirmation = null
         pendingSkill = null
+        pendingNavigationTarget = null
         mapsLaunchDeferrer.clear()
         lastPromptText = ""
         memoryActionHandler.rejectMemoryProposal()
@@ -602,7 +643,7 @@ class ActionExecutor @Inject constructor(
         }
         return ActionResult.Success(
             if (pending != null) {
-                "De acuerdo, cancelado. Di Lazaro cuando quieras otra cosa."
+                "Cancelado."
             } else {
                 "De acuerdo, no lo guardaré."
             },

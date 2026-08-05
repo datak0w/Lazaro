@@ -20,16 +20,10 @@ object WeWalkDevice {
     const val CHAR_BATTERY = "00002a19-0000-1000-8000-00805f9b34fb"
     const val CHAR_BATTERY_EXT = "00002beb-0000-1000-8000-00805f9b34fb"
 
+    /** Botones: Boot HID (Samsung) + P2P fe42 + batería. */
     val NOTIFY_CANDIDATES = listOf(
-        CHAR_HID_REPORT,
         CHAR_HID_BOOT_KB,
         CHAR_RX_FE42,
-        CHAR_UART_01,
-        CHAR_UART_02,
-        CHAR_UART_25,
-        CHAR_CUSTOM_042F,
-        CHAR_FE45,
-        CHAR_NOTIFY_13,
         CHAR_BATTERY,
     )
 
@@ -62,7 +56,10 @@ object WeWalkDevice {
         if (uuid == CHAR_HID_REPORT.lowercase() || uuid == CHAR_HID_BOOT_KB.lowercase()) return true
         if (uuid == CHAR_BATTERY.lowercase() || uuid == CHAR_BATTERY_EXT.lowercase()) return false
         if (uuid == CHAR_NOTIFY_13.lowercase()) return false
-        if (uuid == CHAR_RX_FE42.lowercase() && hexPayload.matches(Regex("^[0-9A-F]{2} [0-9A-F]{2}$"))) return false
+        // P2P fe42: pulsaciones `XX 01` (antes se descartaban y no llegaban al asistente).
+        if (uuid == CHAR_RX_FE42.lowercase()) {
+            return WeWalkP2pButtons.isP2pPress(charUuid, hexPayload)
+        }
         return true
     }
 

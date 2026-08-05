@@ -465,13 +465,15 @@ Preview visual (estilo DEBUG): carretera en perspectiva, líneas de borde/corred
 
 ### Cómo interpretar los pitidos
 
+Regla mental: **silencio = vas centrado**. Si pitas, **aléjate del pitido** para recentrar. Si te pasas, pita el otro lado.
+
 | Señal | Significado |
 |-------|-------------|
-| **Silencio** | Vas bien centrado en el corredor caminable |
-| **Pitido izquierdo** | Desviarte un poco a la **derecha** |
-| **Pitido derecho** | Desviarte un poco a la **izquierda** |
-| **Ambos lados** | Paso estrecho: sigue recto con cuidado |
-| **Tono continuo de alerta** | Te acercas a la **calzada** — vuelve hacia la fachada |
+| **Silencio** | Vas bien centrado — no hay que corregir |
+| **Pitido izquierdo** | Te has desviado a la **izquierda** → corrige hacia la **derecha** (aléjate del pitido) |
+| **Pitido derecho** | Te has desviado a la **derecha** → corrige hacia la **izquierda** |
+| **Ambos lados insistente (alerta)** | Obstáculo frontal cercano (~≤ **3 m**), incluidos objetos bajos (papeleras, postes) — atención / detente |
+| **Tono continuo de alerta (calzada)** | Te acercas a la **calzada** — vuelve hacia la fachada |
 
 ### Pipeline técnico (resumen)
 
@@ -495,6 +497,17 @@ StereoBeepEngine            ← salida estéreo L/R
 | **Google Pixel 9** | Cliente final | LDAF (distancia frontal puntual) + ARCore Depth (fase 2) |
 
 > **Nota:** el LDAF del Pixel 9 da **un punto de distancia** (autofocus), no un mapa completo. Sirve para obstáculos frontales cercanos; la guía lateral usa visión monocular y, en el futuro, profundidad ARCore.
+
+### Modo arnés (recomendado en Pixel)
+
+Las gafas Meta Ray-Ban **no aportan LiDAR/ToF**. Para un POV wearable con profundidad real usamos el **Pixel en arnés o clip** a altura de pecho u ojos:
+
+1. Al iniciar **paseo** o **navegación**, el modo arnés se activa solo.
+2. Coloca el Pixel con la **cámara trasera al frente**, estable, sin tapar el sensor.
+3. Lazaro fuerza guía por profundidad (ARCore Depth en Pixel 9).
+4. **Silencio = centrado**; aléjate del pitido para corregir; obstáculo ~≤3 m → alerta insistente.
+
+No hace falta sujetar el móvil con la mano; el arnés es el “wearable” de profundidad.
 
 ### Pantalla DEBUG
 
@@ -572,6 +585,18 @@ cd Lazaro
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+### Depurar Samsung + bastón (ADB / scrcpy)
+
+Con **Depuración USB** activa y el cable enchufado:
+
+```bash
+./scripts/adb-wait-device.sh   # espera el teléfono
+./scripts/adb-scrcpy.sh         # mirror/control de pantalla
+./scripts/adb-cane-logcat.sh    # logs de botones WeWALK
+```
+
+Detalle: [`scripts/README.md`](scripts/README.md).
+
 ### Tests
 
 ```bash
@@ -600,7 +625,7 @@ GeminiOrchestrator → ActionExecutor
 | Módulo | Función |
 |--------|---------|
 | `WalkableCorridorEstimator` | Estima centro y bordes del corredor caminable (IPM + bordes) |
-| `LateralGuidanceController` | Convierte offset lateral en pitidos proporcionales L/R |
+| `LateralGuidanceController` | Silencio si centrado; pitido L/R del lado del desvío; warning ≤3 m frontal |
 | `OutdoorNavigationBrain` | Orquesta acera, puertas, bifurcaciones y Maps |
 | `SidewalkNotificationSystem` | Alertas de calzada y recuperación |
 | `JunctionBeepGuide` | Pitidos en bifurcaciones (T) |

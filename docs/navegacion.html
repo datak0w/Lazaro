@@ -94,11 +94,19 @@
 
     <h2>Modo paseo</h2>
     <p>
-      Sin Maps: la cámara analiza el espacio y emite pitidos más fuertes hacia donde hay más sitio libre.
-      También avisa de obstáculos con frases cortas.
+      Sin Maps: la cámara te mantiene centrado con silencio cuando vas bien, y pitidos laterales solo si te desvías.
+      Obstáculos frontales cercanos (~3 m, también bajos) pitan de forma insistente; además puede haber frases cortas.
+    </p>
+    <p>
+      En paseo y navegación el <a href="configuracion.html">modo arnés</a> se activa solo:
+      monta el teléfono a altura de pecho u ojos para aprovechar ARCore Depth.
     </p>
 
     <h2>Cómo interpretar los pitidos</h2>
+    <p>
+      Regla mental: <strong>silencio = vas centrado</strong>.
+      Si pitas, <strong>aléjate del pitido</strong> para recentrar; si te pasas, pita el otro lado.
+    </p>
     <figure>
       <img src="pathguide-debug-preview.png" width="880" height="495"
         alt="Vista tipo depuración: carretera en perspectiva, líneas de borde izquierda y derecha, y paneles con métricas como offset lateral e intensidad de pitidos.">
@@ -110,11 +118,11 @@
         <tr><th scope="col">Señal</th><th scope="col">Significado</th></tr>
       </thead>
       <tbody>
-        <tr><td>Silencio</td><td>Vas bien centrado</td></tr>
-        <tr><td>Pitido izquierdo</td><td>Desvíate un poco a la <strong>derecha</strong></td></tr>
-        <tr><td>Pitido derecho</td><td>Desvíate un poco a la <strong>izquierda</strong></td></tr>
-        <tr><td>Ambos lados</td><td>Paso estrecho: sigue recto con cuidado</td></tr>
-        <tr><td>Tono continuo</td><td>Te acercas a la calzada — vuelve a la fachada</td></tr>
+        <tr><td>Silencio</td><td>Vas bien centrado — no hay que corregir</td></tr>
+        <tr><td>Pitido izquierdo</td><td>Te has desviado a la <strong>izquierda</strong> → corrige hacia la <strong>derecha</strong> (aléjate del pitido)</td></tr>
+        <tr><td>Pitido derecho</td><td>Te has desviado a la <strong>derecha</strong> → corrige hacia la <strong>izquierda</strong></td></tr>
+        <tr><td>Ambos lados insistente</td><td>Obstáculo frontal cercano (~≤ <strong>3 m</strong>), incluidos objetos bajos (papeleras, postes) — atención o detente</td></tr>
+        <tr><td>Tono continuo (calzada)</td><td>Te acercas a la calzada — vuelve a la fachada</td></tr>
       </tbody>
     </table>
 

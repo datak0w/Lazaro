@@ -41,6 +41,7 @@ data class PathGuideDebugState(
     val perceptionSource: PerceptionSource = PerceptionSource.MONOCULAR,
     val depthGuidanceMode: DepthGuidanceMode = DepthGuidanceMode.MONOCULAR,
     val deviceLabel: String = "",
+    val harnessMountMode: Boolean = false,
     val frontalDistanceM: Float? = null,
     val odmScore: Float? = null,
     val odmAlongM: Float? = null,

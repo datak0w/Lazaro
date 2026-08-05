@@ -7,6 +7,8 @@ import javax.inject.Singleton
 @Singleton
 class WalkModeAction @Inject constructor(
     private val pathGuideController: PathGuideController,
+    private val pathGuideRepository: PathGuideRepository,
+    private val depthHardwareDetector: DepthHardwareDetector,
 ) {
     suspend fun start(): ActionResult {
         if (pathGuideController.currentMode() == PathGuideMode.NAVEGACION) {
@@ -21,9 +23,12 @@ class WalkModeAction @Inject constructor(
         }
         val started = pathGuideController.start(PathGuideMode.PASEO)
         return if (started) {
+            val depthMode = pathGuideController.debugState.value?.depthGuidanceMode
+                ?: depthHardwareDetector.detect(true).mode
+            // Paseo activa arnés automáticamente.
             ActionResult.Success(
-                "Modo paseo activo. Te guío con pitidos por la cámara. " +
-            "Di Lázaro, terminar paseo, para parar.",
+                "Modo paseo activo. " +
+                    HarnessMountGuidance.startMessage(harnessEnabled = true, depthMode = depthMode),
             )
         } else {
             ActionResult.Error(
@@ -38,5 +43,19 @@ class WalkModeAction @Inject constructor(
         }
         pathGuideController.stop()
         return ActionResult.Success("Paseo terminado.")
+    }
+
+    suspend fun setHarnessMountMode(enabled: Boolean): ActionResult {
+        pathGuideRepository.setHarnessMountMode(enabled)
+        return if (enabled) {
+            ActionResult.Success(
+                "Modo arnés activado. ${HarnessMountGuidance.FULL_CUE}",
+            )
+        } else {
+            ActionResult.Success(
+                "Modo arnés desactivado. Puedes llevar el teléfono en la mano o el bolsillo; " +
+                    "la cámara verá peor la acera.",
+            )
+        }
     }
 }

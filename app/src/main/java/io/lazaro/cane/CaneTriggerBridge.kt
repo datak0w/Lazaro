@@ -8,10 +8,15 @@ import javax.inject.Singleton
 
 @Singleton
 class CaneTriggerBridge @Inject constructor() {
-    private val _triggers = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
-    val triggers: SharedFlow<Unit> = _triggers.asSharedFlow()
+    private val _triggers = MutableSharedFlow<CaneButtonAction>(extraBufferCapacity = 16)
+    val triggers: SharedFlow<CaneButtonAction> = _triggers.asSharedFlow()
 
+    fun emit(action: CaneButtonAction) {
+        _triggers.tryEmit(action)
+    }
+
+    /** Compat: botón primario / listen. */
     fun emitCaneButtonPress() {
-        _triggers.tryEmit(Unit)
+        emit(CaneButtonAction.LISTEN)
     }
 }

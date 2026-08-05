@@ -4,8 +4,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -20,27 +18,18 @@ import javax.inject.Singleton
 @Singleton
 class WakeWordNotifier @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val listeningCueTone: ListeningCueTone,
 ) {
-    private var lastToneMs = 0L
-
     /**
-     * Feedback al detectar «Lázaro»:
+     * Feedback al detectar «Lázaro» / empezar a escuchar:
      * - notificación de sistema **siempre**
      * - vibración **siempre**
-     * - tono solo si han pasado ≥4 s (evita chirps; nunca bloquea notif/vibración)
+     * - tono PCM vía [ListeningCueTone] (Samsung + Pixel; no ToneGenerator)
      */
     fun playActivationSound() {
         showListeningNotification()
         pulseVibration()
-
-        // En Samsung el ToneGenerator pelea con el STT y provoca «No te he oído»
-        if (SamsungVoiceCompat.isSamsung()) return
-
-        val now = System.currentTimeMillis()
-        if (now - lastToneMs >= TONE_DEBOUNCE_MS) {
-            lastToneMs = now
-            playTone()
-        }
+        listeningCueTone.play()
     }
 
     fun showListeningNotification(statusText: String? = null) {
@@ -82,16 +71,6 @@ class WakeWordNotifier @Inject constructor(
         }
     }
 
-    private fun playTone() {
-        try {
-            val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 75)
-            tone.startTone(ToneGenerator.TONE_PROP_ACK, 140)
-            tone.release()
-        } catch (_: Exception) {
-            // Fallback: vibración + notif ya se emitieron.
-        }
-    }
-
     private fun pulseVibration() {
         val vibrator = vibrator() ?: return
         try {
@@ -118,7 +97,6 @@ class WakeWordNotifier @Inject constructor(
 
     companion object {
         private const val WAKE_NOTIFICATION_ID = 4_201
-        private const val TONE_DEBOUNCE_MS = 4_000L
         private const val NOTIFICATION_TIMEOUT_MS = 12_000L
     }
 }

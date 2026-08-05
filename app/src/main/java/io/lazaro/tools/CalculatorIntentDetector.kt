@@ -8,7 +8,7 @@ import javax.inject.Singleton
 class CalculatorIntentDetector @Inject constructor() {
 
     fun detect(userText: String): Boolean {
-        val text = normalize(userText)
+        val text = SpanishSpokenNumbers.replaceSpokenNumbers(normalize(userText))
         if (text.isBlank()) return false
         if (TRIGGERS.any { text.contains(it) }) return true
         return EXPRESSION_PATTERN.containsMatchIn(text)
@@ -19,7 +19,7 @@ class CalculatorIntentDetector @Inject constructor() {
             .replace(Regex("\\p{M}+"), "")
             .lowercase()
             .replace("lazaro", " ")
-            .replace("lázaro", " ")
+            .replace(Regex("[¿?¡!]"), " ")
             .replace(Regex("[^a-z0-9\\s+*/.,-]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
@@ -28,19 +28,24 @@ class CalculatorIntentDetector @Inject constructor() {
     companion object {
         private val TRIGGERS = listOf(
             "cuanto es",
-            "cuánto es",
+            "cuanto son",
+            "cuanto da",
+            "cuanto dan",
+            "cuanto hacen",
             "calcula",
             "calculame",
-            "calcúlame",
             "multiplica",
             "divide",
             "suma",
             "resta",
             "resultado de",
+            "la suma de",
+            "el producto de",
+            "la resta de",
         )
 
         private val EXPRESSION_PATTERN = Regex(
-            """\d+\s*(por|x|\*|mas|más|menos|entre|\+|-)\s*\d+""",
+            """\d+\s*(por|x|\*|mas|menos|entre|dividido\s+(?:entre|por)|\+|-|/)\s*\d+""",
         )
     }
 }

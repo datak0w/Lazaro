@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -60,6 +61,7 @@ class CaneBleManager @Inject constructor(
     private val subscribedUuids = mutableSetOf<String>()
     private var handshakeJob: Job? = null
     private var writeContinuation: ((Boolean) -> Unit)? = null
+    private var descriptorContinuation: ((Boolean) -> Unit)? = null
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -108,6 +110,8 @@ class CaneBleManager @Inject constructor(
                             handshakeDetail = null,
                         )
                     }
+                    // Samsung engancha HID Host y se queda con los botones; soltarlo.
+                    releaseSystemHidHost(gatt.device)
                     gatt.requestMtu(517)
                     gatt.readRemoteRssi()
                 }
@@ -151,9 +155,24 @@ class CaneBleManager @Inject constructor(
                     charMap["${service.uuid}|${char.uuid}"] = char
                 }
             }
-            subscribeAllNotify(available)
-            readBattery()
-            startHandshake()
+            handshakeJob?.cancel()
+            handshakeJob = scope.launch {
+                subscribeAllNotify(available)
+                runHandshake()
+            }
+        }
+
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int,
+        ) {
+            val ok = status == BluetoothGatt.GATT_SUCCESS
+            if (!ok) {
+                Log.w(TAG, "Descriptor write failed ${descriptor.characteristic.uuid} status=$status")
+            }
+            descriptorContinuation?.invoke(ok)
+            descriptorContinuation = null
         }
 
         override fun onCharacteristicRead(
@@ -189,6 +208,16 @@ class CaneBleManager @Inject constructor(
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray,
         ) {
+            processIncoming(characteristic.uuid.toString(), value)
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+        ) {
+            @Suppress("DEPRECATION")
+            val value = characteristic.value ?: return
             processIncoming(characteristic.uuid.toString(), value)
         }
 
@@ -250,7 +279,8 @@ class CaneBleManager @Inject constructor(
     /** Reenvía la secuencia de handshake (útil si los botones no responden). */
     fun retryHandshake() {
         if (!_state.value.isConnected) return
-        startHandshake()
+        handshakeJob?.cancel()
+        handshakeJob = scope.launch { runHandshake() }
     }
 
     fun startHandshakeCapture() {
@@ -266,55 +296,144 @@ class CaneBleManager @Inject constructor(
 
     fun handshakeCaptureCount(): Int = handshakeCapture.entryCount.value
 
-    private fun startHandshake() {
-        handshakeJob?.cancel()
-        handshakeJob = scope.launch {
-            _state.update {
-                it.copy(
-                    handshakeState = CaneHandshakeState.IN_PROGRESS,
-                    handshakeDetail = "Preparando canales…",
-                )
-            }
-            delay(NOTIFY_SETTLE_MS)
-            enableHidReportMode()
-            delay(WRITE_GAP_MS)
-            readHidCharacteristics()
+    private suspend fun runHandshake() {
+        _state.update {
+            it.copy(
+                handshakeState = CaneHandshakeState.IN_PROGRESS,
+                handshakeDetail = "Preparando canal de botones…",
+            )
+        }
+        delay(NOTIFY_SETTLE_MS)
 
-            var failures = 0
-            for (step in WeWalkHandshake.buildSequence()) {
-                if (!charExists(step.charUuid)) {
-                    Log.d(TAG, "Handshake skip (no char): ${step.label}")
-                    continue
-                }
-                _state.update { it.copy(handshakeDetail = step.label) }
-                val ok = writeBytes(step.charUuid, step.data)
-                if (!ok) {
-                    failures++
-                    Log.w(TAG, "Handshake falló: ${step.label}")
+        // Samsung: Report HID (2A4D) es PRIVILEGED. Forzar Boot Protocol → 2A22 usable.
+        _state.update { it.copy(handshakeDetail = "HID Boot mode") }
+        enableHidBootMode()
+        delay(200)
+        subscribedUuids.remove(WeWalkDevice.CHAR_HID_BOOT_KB.lowercase())
+        try {
+            enableNotifications(WeWalkDevice.CHAR_HID_BOOT_KB)
+        } catch (e: Exception) {
+            Log.w(TAG, "NOTIFY Boot KB: ${e.message}")
+        }
+
+        // Activar sesión app (P2P fe42, best-effort).
+        var txOk = false
+        if (charExists(WeWalkDevice.CHAR_TX_FE43)) {
+            val steps = listOf(
+                "Consulta batería P2P" to WeWalkProtocol.buildFrame(WeWalkProtocol.CMD_BATTERY),
+                "Inicio sesión P2P" to WeWalkProtocol.buildFrame(WeWalkProtocol.CMD_INIT),
+                "Activar sesión app" to WeWalkProtocol.buildFrame(WeWalkProtocol.CMD_SESSION, byteArrayOf(0x02)),
+            )
+            for ((label, data) in steps) {
+                _state.update { it.copy(handshakeDetail = label) }
+                val ok = writeBytes(WeWalkDevice.CHAR_TX_FE43, data)
+                if (ok) {
+                    txOk = true
+                    Log.i(TAG, "Handshake TX: $label")
                 } else {
-                    Log.i(TAG, "Handshake TX: ${step.label}")
+                    Log.w(TAG, "Handshake falló: $label")
                 }
-                delay(step.delayAfterMs)
-            }
-
-            val finalState = if (failures >= WeWalkHandshake.buildSequence().size) {
-                CaneHandshakeState.FAILED
-            } else {
-                CaneHandshakeState.READY
-            }
-            _state.update {
-                it.copy(
-                    handshakeState = finalState,
-                    handshakeDetail = when (finalState) {
-                        CaneHandshakeState.READY ->
-                            "Protocolo enviado. Pulsa un botón del bastón."
-                        CaneHandshakeState.FAILED ->
-                            "Handshake incompleto. Cierra la app oficial WeWALK e inténtalo de nuevo."
-                        else -> it.handshakeDetail
-                    },
-                )
+                delay(200)
             }
         }
+
+        val p2pReady = subscribedUuids.contains(WeWalkDevice.CHAR_RX_FE42.lowercase())
+        val hidReady = subscribedUuids.contains(WeWalkDevice.CHAR_HID_BOOT_KB.lowercase())
+        if (p2pReady) {
+            subscribedUuids.remove(WeWalkDevice.CHAR_RX_FE42.lowercase())
+            try {
+                enableNotifications(WeWalkDevice.CHAR_RX_FE42)
+            } catch (e: Exception) {
+                Log.w(TAG, "Re-NOTIFY fe42: ${e.message}")
+            }
+        }
+        val stillP2p = subscribedUuids.contains(WeWalkDevice.CHAR_RX_FE42.lowercase())
+        val stillHid = subscribedUuids.contains(WeWalkDevice.CHAR_HID_BOOT_KB.lowercase())
+        val finalState = if (stillP2p || stillHid || hidReady) {
+            CaneHandshakeState.READY
+        } else {
+            CaneHandshakeState.FAILED
+        }
+        _state.update {
+            it.copy(
+                handshakeState = finalState,
+                handshakeDetail = when {
+                    finalState != CaneHandshakeState.READY ->
+                        "No se pudo activar botones. Cierra WeWALK/nRF e inténtalo."
+                    stillHid || hidReady ->
+                        "Canal HID Boot listo. Pulsa un botón del bastón."
+                    else ->
+                        "Canal de botones listo. Pulsa un botón del bastón."
+                },
+            )
+        }
+        Log.i(TAG, "Handshake listo p2p=$stillP2p hidBoot=$stillHid batteryTx=$txOk")
+    }
+
+    /** 0x00 = Boot Protocol Mode (Report Mode 0x01 exige 2A4D privilegiado en Samsung). */
+    private suspend fun enableHidBootMode() {
+        if (!charExists(WeWalkDevice.CHAR_HID_PROTOCOL_MODE)) return
+        try {
+            val ok = writeBytes(WeWalkDevice.CHAR_HID_PROTOCOL_MODE, byteArrayOf(0x00))
+            Log.i(TAG, "HID Protocol Mode → Boot: $ok")
+        } catch (e: SecurityException) {
+            Log.w(TAG, "HID Protocol Mode omitido: ${e.message}")
+        } catch (e: Exception) {
+            Log.w(TAG, "HID Protocol Mode falló: ${e.message}")
+        }
+    }
+
+    /**
+     * En Samsung, al conectar un dispositivo con servicio HID el stack abre HID Host
+     * (ble_bta_hh) y los botones van por ahí (PRIVILEGED), no por fe42.
+     * BluetoothHidHost no está en el SDK público → reflexión.
+     */
+    private fun releaseSystemHidHost(device: BluetoothDevice) {
+        val bt = adapter ?: return
+        val ok = bt.getProfileProxy(
+            context,
+            object : BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                    if (profile != HID_HOST_PROFILE) return
+                    try {
+                        @Suppress("UNCHECKED_CAST")
+                        val connected = proxy.javaClass
+                            .getMethod("getConnectedDevices")
+                            .invoke(proxy) as? List<BluetoothDevice>
+                            ?: emptyList()
+                        val isConnected = connected.any {
+                            it.address.equals(device.address, ignoreCase = true)
+                        }
+                        Log.i(TAG, "HID_HOST connected=$isConnected for ${device.address}")
+                        try {
+                            val policyMethod = proxy.javaClass.getMethod(
+                                "setConnectionPolicy",
+                                BluetoothDevice::class.java,
+                                Int::class.javaPrimitiveType,
+                            )
+                            val result = policyMethod.invoke(proxy, device, CONNECTION_POLICY_FORBIDDEN)
+                            Log.i(TAG, "HID_HOST policy FORBIDDEN=$result")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "HID_HOST setConnectionPolicy: ${e.message}")
+                        }
+                        val disconnected = proxy.javaClass
+                            .getMethod("disconnect", BluetoothDevice::class.java)
+                            .invoke(proxy, device)
+                        Log.i(TAG, "HID_HOST disconnect=$disconnected")
+                    } catch (e: SecurityException) {
+                        Log.w(TAG, "HID_HOST requiere privilegio: ${e.message}")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "HID_HOST release falló: ${e.message}")
+                    } finally {
+                        bt.closeProfileProxy(HID_HOST_PROFILE, proxy)
+                    }
+                }
+
+                override fun onServiceDisconnected(profile: Int) = Unit
+            },
+            HID_HOST_PROFILE,
+        )
+        if (!ok) Log.w(TAG, "No se pudo obtener proxy HID_HOST")
     }
 
     private fun charExists(charUuid: String): Boolean {
@@ -344,81 +463,103 @@ class CaneBleManager @Inject constructor(
                 note = "handshake TX",
             )
         }
-        return suspendCancellableCoroutine { cont ->
-            writeContinuation = { ok -> cont.resume(ok) }
-            cont.invokeOnCancellation { writeContinuation = null }
-            if (!g.writeCharacteristic(char)) {
-                writeContinuation = null
-                cont.resume(false)
+        if (useNoResponse) {
+            val queued = g.writeCharacteristic(char)
+            if (queued) delay(WRITE_GAP_MS)
+            return queued
+        }
+        val result = withTimeoutOrNull(GATT_OP_TIMEOUT_MS) {
+            suspendCancellableCoroutine { cont ->
+                writeContinuation = { ok -> cont.resume(ok) }
+                cont.invokeOnCancellation { writeContinuation = null }
+                if (!g.writeCharacteristic(char)) {
+                    writeContinuation = null
+                    cont.resume(false)
+                }
             }
         }
+        return result == true
     }
 
-    private fun enableHidReportMode() {
-        val info = charMap.entries.firstOrNull {
-            it.key.endsWith("|${WeWalkDevice.CHAR_HID_PROTOCOL_MODE}", ignoreCase = true)
-        } ?: return
-        val char = info.value
-        char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        char.value = byteArrayOf(0x01)
-        gatt?.writeCharacteristic(char)
-    }
-
-    private fun readHidCharacteristics() {
-        listOf(
-            WeWalkDevice.CHAR_HID_REPORT,
-            WeWalkDevice.CHAR_HID_BOOT_KB,
-            WeWalkDevice.CHAR_HID_REPORT_MAP,
-        ).forEach { uuid ->
-            charMap.entries.firstOrNull {
-                it.key.endsWith("|$uuid", ignoreCase = true)
-            }?.value?.let { gatt?.readCharacteristic(it) }
-        }
-    }
-
-    private fun subscribeAllNotify(available: Set<String>) {
-        WeWalkDevice.NOTIFY_CANDIDATES.forEach { candidate ->
-            if (available.contains(candidate.lowercase())) {
+    private suspend fun subscribeAllNotify(available: Set<String>) {
+        for (candidate in WeWalkDevice.NOTIFY_CANDIDATES) {
+            if (!available.contains(candidate.lowercase())) continue
+            try {
                 enableNotifications(candidate)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "NOTIFY omitido $candidate: ${e.message}")
+            } catch (e: Exception) {
+                Log.w(TAG, "NOTIFY falló $candidate: ${e.message}")
             }
+            delay(WRITE_GAP_MS)
         }
     }
 
-    private fun enableNotifications(charUuid: String) {
+    private suspend fun enableNotifications(charUuid: String) {
         if (subscribedUuids.contains(charUuid.lowercase())) return
         val entry = charMap.entries.firstOrNull {
             it.key.endsWith("|$charUuid", ignoreCase = true)
         } ?: return
         val char = entry.value
-        gatt?.setCharacteristicNotification(char, true)
+        val g = gatt ?: return
+        val ok = try {
+            g.setCharacteristicNotification(char, true)
+        } catch (e: SecurityException) {
+            throw e
+        }
+        if (!ok) {
+            Log.w(TAG, "setCharacteristicNotification false: $charUuid")
+            return
+        }
         val cccd = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-        char.getDescriptor(cccd)?.let { desc ->
-            val enableValue = if (char.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) {
-                BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
-            } else {
+        val desc = char.getDescriptor(cccd) ?: run {
+            Log.w(TAG, "Sin CCCD: $charUuid props=0x${char.properties.toString(16)}")
+            return
+        }
+        // Preferir NOTIFY: en STM32 P2P (fe42) INDICATE a veces está marcado pero no envía.
+        val enableValue = when {
+            char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 ->
                 BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            char.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0 ->
+                BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+            else ->
+                BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        }
+        Log.i(
+            TAG,
+            "NOTIFY req ${WeWalkDevice.labelForUuid(charUuid) ?: charUuid} " +
+                "props=0x${char.properties.toString(16)} " +
+                "cccd=${enableValue.joinToString(" ") { "%02X".format(it) }}",
+        )
+        desc.value = enableValue
+        val wrote = withTimeoutOrNull(GATT_OP_TIMEOUT_MS) {
+            suspendCancellableCoroutine { cont ->
+                descriptorContinuation = { success -> cont.resume(success) }
+                cont.invokeOnCancellation { descriptorContinuation = null }
+                if (!g.writeDescriptor(desc)) {
+                    descriptorContinuation = null
+                    cont.resume(false)
+                }
             }
-            desc.value = enableValue
-            gatt?.writeDescriptor(desc)
+        } == true
+        if (wrote) {
             subscribedUuids += charUuid.lowercase()
+            Log.i(TAG, "NOTIFY ON ${WeWalkDevice.labelForUuid(charUuid) ?: charUuid}")
             if (handshakeCapture.isActive()) {
                 handshakeCapture.info(
                     charUuid = charUuid,
                     note = "NOTIFY ON ${WeWalkDevice.labelForUuid(charUuid) ?: charUuid}",
                 )
             }
+        } else {
+            Log.w(TAG, "NOTIFY CCCD falló $charUuid")
         }
-    }
-
-    private fun readBattery() {
-        val entry = charMap.entries.firstOrNull {
-            it.key.endsWith("|${WeWalkDevice.CHAR_BATTERY}", ignoreCase = true)
-        } ?: return
-        gatt?.readCharacteristic(entry.value)
     }
 
     private fun processIncoming(charUuid: String, value: ByteArray) {
         val hex = value.joinToString(" ") { "%02X".format(it) }
+        // Log siempre (antes del filtro) para depurar botones.
+        Log.i(TAG, "RX raw ${WeWalkDevice.labelForUuid(charUuid) ?: charUuid}: $hex")
         handshakeCapture.recordRx(
             charUuid = charUuid,
             data = value,
@@ -427,7 +568,9 @@ class CaneBleManager @Inject constructor(
         when (charUuid.lowercase()) {
             WeWalkDevice.CHAR_BATTERY.lowercase() -> {
                 val pct = value.firstOrNull()?.toInt()?.and(0xFF)
-                if (pct != null) _state.update { it.copy(batteryPercent = pct) }
+                if (pct != null && pct in 0..100) {
+                    _state.update { it.copy(batteryPercent = pct) }
+                }
             }
         }
 
@@ -443,7 +586,9 @@ class CaneBleManager @Inject constructor(
             }
             if (frame.cmd == WeWalkProtocol.CMD_BATTERY) {
                 frame.payload.firstOrNull()?.toInt()?.and(0xFF)?.let { pct ->
-                    _state.update { it.copy(batteryPercent = pct) }
+                    if (pct in 0..100) {
+                        _state.update { it.copy(batteryPercent = pct) }
+                    }
                 }
             }
         }
@@ -456,6 +601,8 @@ class CaneBleManager @Inject constructor(
                 WeWalkDevice.describeHidReport(value)
             else -> WeWalkDevice.labelForUuid(charUuid)
         }
+
+        Log.i(TAG, "RX ${label ?: charUuid}: $hex")
 
         _state.update {
             it.copy(
@@ -474,7 +621,11 @@ class CaneBleManager @Inject constructor(
 
     companion object {
         private const val TAG = "CaneBleManager"
-        private const val NOTIFY_SETTLE_MS = 900L
-        private const val WRITE_GAP_MS = 200L
+        private const val NOTIFY_SETTLE_MS = 300L
+        private const val WRITE_GAP_MS = 80L
+        private const val GATT_OP_TIMEOUT_MS = 2500L
+        /** android.bluetooth.BluetoothProfile.HID_HOST (no expuesto en SDK app). */
+        private const val HID_HOST_PROFILE = 4
+        private const val CONNECTION_POLICY_FORBIDDEN = 0
     }
 }

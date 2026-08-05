@@ -131,6 +131,18 @@ object ToolDefinitions {
                     requiredParameters = emptyList(),
                 ),
                 FunctionDeclaration(
+                    name = "set_harness_mount_mode",
+                    description = "Activa o desactiva el modo arnés: teléfono en clip/arnés a altura de pecho u ojos " +
+                        "para guía POV con profundidad ARCore en Pixel (recomendado frente a gafas sin LiDAR).",
+                    parameters = listOf(
+                        Schema.str(
+                            "enabled",
+                            "true para activar modo arnés, false para desactivar",
+                        ),
+                    ),
+                    requiredParameters = listOf("enabled"),
+                ),
+                FunctionDeclaration(
                     name = "list_saved_routes",
                     description = "Lista las rutas grabadas del usuario (nombres) para ofrecerlas o recordarlas.",
                     parameters = emptyList(),

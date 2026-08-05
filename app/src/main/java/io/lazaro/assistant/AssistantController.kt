@@ -2,14 +2,18 @@ package io.lazaro.assistant
 
 import io.lazaro.actions.ActionExecutor
 import io.lazaro.actions.ActionResult
+import io.lazaro.actions.ToolName
 import io.lazaro.audiobook.BookReaderAction
 import io.lazaro.ai.AssistantReply
 import io.lazaro.ai.GeminiOrchestrator
 import io.lazaro.ai.MemoryExtractor
+import io.lazaro.cane.CaneButtonAction
 import io.lazaro.memory.MemoryContextBuilder
 import io.lazaro.memory.MemoryRepository
 import io.lazaro.navigation.NavigationGuidanceMonitor
 import io.lazaro.navigation.NavigationSessionManager
+import io.lazaro.navigation.NavigationTarget
+import io.lazaro.navigation.MapsSessionCloser
 import io.lazaro.pathguide.PathGuideController
 import io.lazaro.pathguide.PathGuideMode
 import io.lazaro.routes.recording.RouteRecorderController
@@ -24,6 +28,9 @@ import io.lazaro.voice.WakeWordDetector
 import io.lazaro.voice.WakeWordMatch
 import io.lazaro.voice.WakeWordNotifier
 import io.lazaro.voice.WakeWordStatus
+import android.content.Context
+import android.media.AudioManager
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -51,6 +58,7 @@ data class AssistantUiState(
 
 @Singleton
 class AssistantController @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val speechRecognitionManager: SpeechRecognitionManager,
     private val textToSpeechManager: TextToSpeechManager,
     private val geminiOrchestrator: GeminiOrchestrator,
@@ -63,11 +71,13 @@ class AssistantController @Inject constructor(
     private val contextIntentDetector: ContextIntentDetector,
     private val navigationGuidanceMonitor: NavigationGuidanceMonitor,
     private val navigationSessionManager: NavigationSessionManager,
+    private val mapsSessionCloser: MapsSessionCloser,
     private val stopActiveSessionHandler: StopActiveSessionHandler,
     private val pathGuideController: PathGuideController,
     private val wakeWordController: WakeWordController,
     private val wakeWordNotifier: WakeWordNotifier,
     private val softWaitToneEngine: SoftWaitToneEngine,
+    private val caneLowBatteryMonitor: io.lazaro.cane.CaneLowBatteryMonitor,
     private val routeRecorderController: RouteRecorderController,
     private val activeSessionTracker: ActiveSessionTracker,
     private val proactiveSuggestionEngine: ProactiveSuggestionEngine,
@@ -131,6 +141,7 @@ class AssistantController @Inject constructor(
         listenProfile = ListeningProfile.STANDBY
         startWatchdog()
         wakeWordController.start()
+        caneLowBatteryMonitor.start { _uiState.value.voiceState }
         returnToStandby()
     }
 
@@ -140,6 +151,7 @@ class AssistantController @Inject constructor(
         navigationPauseJob?.cancel()
         conversationWindowJob?.cancel()
         softWaitToneEngine.stop()
+        caneLowBatteryMonitor.stop()
         forceStopOutput()
         wakeWordController.stop()
         wakeWordNotifier.clearListeningNotification()
@@ -168,6 +180,7 @@ class AssistantController @Inject constructor(
         forceStopOutput()
         resetCounters()
         listenProfile = ListeningProfile.DIRECT_RESPONSE
+        wakeWordNotifier.playActivationSound()
         val hint = if (actionExecutor.hasPendingConfirmation()) {
             "Responde, repíteme las opciones, o di cancela."
         } else {
@@ -175,6 +188,80 @@ class AssistantController @Inject constructor(
         }
         markState(VoiceState.Listening, hint, awaitingTrigger = false)
         startDirectListening()
+    }
+
+    /** Botones del bastón WeWALK (P2P fe42). */
+    fun handleCaneButton(action: CaneButtonAction) {
+        if (!isActive && action != CaneButtonAction.VOLUME_UP && action != CaneButtonAction.VOLUME_DOWN) {
+            return
+        }
+        when (action) {
+            CaneButtonAction.LISTEN -> interruptAndListen()
+            CaneButtonAction.CANCEL -> cancelFromCane()
+            CaneButtonAction.WHERE_AM_I -> whereAmIFromCane()
+            CaneButtonAction.VOLUME_DOWN -> adjustMediaVolume(-1)
+            CaneButtonAction.VOLUME_UP -> adjustMediaVolume(+1)
+        }
+    }
+
+    private fun cancelFromCane() {
+        if (!isActive) return
+        listeningSuspended = false
+        navigationPauseJob?.cancel()
+        forceStopOutput()
+        resetCounters()
+        scope?.launch {
+            if (actionExecutor.hasPendingConfirmation()) {
+                actionExecutor.cancelPending()
+                conversationContext.clearPending()
+            }
+            val closingNav = navigationSessionManager.isNavigationActive() ||
+                activeSessionTracker.hasActiveSession()
+            if (closingNav) {
+                navigationSessionManager.endSession(speakConfirmation = false)
+                mapsSessionCloser.bringLazaroToFront()
+                textToSpeechManager.speak("Navegación cancelada.")
+            } else {
+                mapsSessionCloser.closeMapsNavigation()
+                mapsSessionCloser.bringLazaroToFront()
+                textToSpeechManager.speak("Cancelado.")
+            }
+            markState(VoiceState.Idle, "Listo.", awaitingTrigger = true)
+            resumeListening(directAfter = false)
+        }
+    }
+
+    private fun whereAmIFromCane() {
+        if (!isActive) return
+        forceStopOutput()
+        scope?.launch {
+            markState(VoiceState.Speaking, "Buscando ubicación…", awaitingTrigger = false)
+            when (val result = actionExecutor.execute(ToolName.WhereAmI.id, emptyMap())) {
+                is ActionResult.Success -> {
+                    textToSpeechManager.speak(result.message)
+                    markState(VoiceState.Idle, result.message, awaitingTrigger = true)
+                }
+                is ActionResult.Error -> {
+                    textToSpeechManager.speak(result.message)
+                    markState(VoiceState.Idle, result.message, awaitingTrigger = true)
+                }
+                is ActionResult.NeedsConfirmation -> {
+                    textToSpeechManager.speak(result.prompt)
+                    markState(VoiceState.Idle, result.prompt, awaitingTrigger = true)
+                }
+            }
+            resumeListening(directAfter = false)
+        }
+    }
+
+    private fun adjustMediaVolume(direction: Int) {
+        val am = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val stream = AudioManager.STREAM_MUSIC
+        am.adjustStreamVolume(
+            stream,
+            if (direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
+            AudioManager.FLAG_SHOW_UI,
+        )
     }
 
     private fun resumeListening(directAfter: Boolean = false) {
@@ -613,7 +700,13 @@ class AssistantController @Inject constructor(
                     if (!navigationSessionManager.isNavigationActive() ||
                         !activeSessionTracker.hasActiveSession()
                     ) {
-                        navigationSessionManager.startSession(label = label, routeReplay = routeReplay)
+                        val navTarget = actionExecutor.consumePendingNavigationTarget()
+                            ?: NavigationTarget(label = label)
+                        navigationSessionManager.startSession(
+                            label = label,
+                            routeReplay = routeReplay,
+                            target = navTarget,
+                        )
                     } else {
                         activeSessionTracker.updateLabel(label)
                         activeSessionTracker.resumeFromChat()
@@ -807,7 +900,7 @@ class AssistantController @Inject constructor(
         val label = activeSessionTracker.snapshot()?.label ?: "destino"
         markState(
             voiceState = VoiceState.Idle,
-            statusMessage = "Navegando a $label. Di Lazaro para hablar; la cámara guía con pitidos.",
+            statusMessage = "Navegando a $label. Coloca el teléfono en el arnés; la cámara guía con pitidos. Di Lazaro para hablar.",
             awaitingTrigger = true,
         )
 

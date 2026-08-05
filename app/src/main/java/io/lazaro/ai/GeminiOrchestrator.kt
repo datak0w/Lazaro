@@ -51,7 +51,7 @@ class GeminiOrchestrator @Inject constructor(
     suspend fun handleUserMessage(userText: String): AssistantReply {
         val cleaned = contextIntentDetector.stripWakeWord(userText).ifBlank { userText }
         if (cleaned.isBlank()) {
-            return AssistantReply("¿Eh? No he pillado nada. Di Lazaro y suelta la que quieras.")
+            return AssistantReply("¿Perdón? Repite, por favor.")
         }
 
         if (actionExecutor.hasPendingConfirmation()) {
@@ -134,6 +134,7 @@ class GeminiOrchestrator @Inject constructor(
         actionExecutor.tryHandleContactSelection(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleTimeIntent(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleBatteryIntent(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleCalculatorIntent(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleWeatherIntent(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleReceiptIntent(userText)?.let { return toReply(it) }
@@ -153,8 +154,7 @@ class GeminiOrchestrator @Inject constructor(
         actionExecutor.tryHandleBookSelection(userText)?.let { return toReply(it) }
 
         return AssistantReply(
-            "Sigo con ${actionExecutor.getPendingHint()}. " +
-                "Di tu respuesta, repíteme las opciones, o cancela para empezar otra cosa.",
+            "Sigo con ${actionExecutor.getPendingHint()}. Di tu respuesta o cancela.",
             skipAutoLearn = true,
         )
     }
@@ -174,6 +174,7 @@ class GeminiOrchestrator @Inject constructor(
         actionExecutor.tryHandleContactSelection(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleTimeIntent(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleBatteryIntent(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleCalculatorIntent(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleWeatherIntent(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleReceiptIntent(userText)?.let { return toReply(it) }

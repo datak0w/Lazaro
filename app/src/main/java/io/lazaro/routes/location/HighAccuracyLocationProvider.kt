@@ -32,6 +32,9 @@ class HighAccuracyLocationProvider @Inject constructor(
     private val client: FusedLocationProviderClient =
         LocationServices.getFusedLocationProviderClient(context)
 
+    @Volatile
+    private var cached: GpsFix? = null
+
     @SuppressLint("MissingPermission")
     fun fixes(intervalMs: Long = 1_000L): Flow<GpsFix> = callbackFlow {
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMs)
@@ -42,7 +45,9 @@ class HighAccuracyLocationProvider @Inject constructor(
         val callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
-                trySend(loc.toFix())
+                val fix = loc.toFix()
+                cached = fix
+                trySend(fix)
             }
         }
 
@@ -50,13 +55,17 @@ class HighAccuracyLocationProvider @Inject constructor(
         awaitClose { client.removeLocationUpdates(callback) }
     }
 
+    fun lastFixCached(): GpsFix? = cached
+
     @SuppressLint("MissingPermission")
     suspend fun lastFix(): GpsFix? {
         return try {
             val loc = com.google.android.gms.tasks.Tasks.await(client.lastLocation)
-            loc?.toFix()
+            val fix = loc?.toFix()
+            if (fix != null) cached = fix
+            fix
         } catch (_: Exception) {
-            null
+            cached
         }
     }
 

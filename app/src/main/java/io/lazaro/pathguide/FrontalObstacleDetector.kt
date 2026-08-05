@@ -1,25 +1,30 @@
 package io.lazaro.pathguide
 
 import kotlin.math.abs
-import kotlin.math.max
 
+/**
+ * Detecta obstáculos frontales en ROI central, con énfasis en la banda inferior
+ * (papeleras, postes de tráfico, bordillos altos, etc.).
+ */
 class FrontalObstacleDetector {
 
     private var emaSeverity = 0f
     private var blockedLatch = false
 
     fun detect(gray: ByteArray, width: Int, height: Int, sensitivity: Float): FrontalObstacleState {
-        val roiTop = (height * 0.48f).toInt()
-        val roiBottom = (height * 0.90f).toInt()
-        val colStart = (width * 0.30f).toInt()
-        val colEnd = (width * 0.70f).toInt()
+        // ROI un poco más bajo: objetos a altura de cintura/rodilla.
+        val roiTop = (height * 0.50f).toInt()
+        val roiBottom = (height * 0.94f).toInt()
+        val colStart = (width * 0.28f).toInt()
+        val colEnd = (width * 0.72f).toInt()
 
         val centerRef = bandMedian(gray, width, height, roiTop, roiBottom, colStart, colEnd)
         val occupancy = bandOccupancy(gray, width, height, roiTop, roiBottom, colStart, colEnd, centerRef)
         val edgeDensity = bandEdgeDensity(gray, width, height, roiTop, roiBottom, colStart, colEnd)
         val lowerWeight = lowerOccupancy(gray, width, height, roiTop, roiBottom, colStart, colEnd, centerRef)
 
-        val rawSeverity = (occupancy * 0.40f + edgeDensity * 0.35f + lowerWeight * 0.25f)
+        // Más peso a la banda inferior (objetos bajos).
+        val rawSeverity = (occupancy * 0.28f + edgeDensity * 0.27f + lowerWeight * 0.45f)
             .coerceIn(0f, 1f)
 
         emaSeverity = emaSeverity * 0.68f + rawSeverity * 0.32f
@@ -36,7 +41,8 @@ class FrontalObstacleDetector {
         return FrontalObstacleState(
             blocked = blockedLatch,
             severity = emaSeverity,
-            closeRange = lowerWeight >= 0.30f && emaSeverity >= deactivate,
+            closeRange = lowerWeight >= CLOSE_RANGE_LOWER ||
+                (emaSeverity >= deactivate && lowerWeight >= 0.22f),
         )
     }
 
@@ -65,7 +71,7 @@ class FrontalObstacleDetector {
                 if (idx !in gray.indices) continue
                 total++
                 val value = gray[idx].toInt() and 0xFF
-                if (value < referenceMedian - 20) occupied++
+                if (value < referenceMedian - 18) occupied++
             }
         }
         return if (total == 0) 0f else (occupied.toFloat() / total).coerceIn(0f, 1f)
@@ -82,7 +88,8 @@ class FrontalObstacleDetector {
         referenceMedian: Int,
     ): Float {
         if (colEnd <= colStart) return 0f
-        val lowerStart = roiTop + ((roiBottom - roiTop) * 0.45f).toInt()
+        // Banda inferior más amplia: desde ~35% del ROI hacia abajo.
+        val lowerStart = roiTop + ((roiBottom - roiTop) * 0.35f).toInt()
         var occupied = 0
         var total = 0
         for (y in lowerStart until roiBottom) {
@@ -92,7 +99,7 @@ class FrontalObstacleDetector {
                 if (idx !in gray.indices) continue
                 total++
                 val value = gray[idx].toInt() and 0xFF
-                if (value < referenceMedian - 18) occupied++
+                if (value < referenceMedian - 16) occupied++
             }
         }
         return if (total == 0) 0f else (occupied.toFloat() / total).coerceIn(0f, 1f)
@@ -158,7 +165,9 @@ class FrontalObstacleDetector {
     }
 
     companion object {
-        private const val ACTIVATE_THRESHOLD = 0.32f
-        private const val DEACTIVATE_THRESHOLD = 0.20f
+        /** Más sensible para no perder papeleras/postes a ~2–4 m. */
+        private const val ACTIVATE_THRESHOLD = 0.26f
+        private const val DEACTIVATE_THRESHOLD = 0.16f
+        private const val CLOSE_RANGE_LOWER = 0.24f
     }
 }

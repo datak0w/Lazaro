@@ -19,6 +19,7 @@ class OutdoorNavigationBrain @Inject constructor(
     private val mapsVisionFusionCoordinator: MapsVisionFusionCoordinator,
     private val turnAlignmentGuide: TurnAlignmentGuide,
     private val depthPerceptionProvider: DepthPerceptionProvider,
+    private val deviceRotationTracker: DeviceRotationTracker,
 ) {
     private val streetLayoutDetector = StreetLayoutDetector()
     private val walkableCorridorEstimator = WalkableCorridorEstimator()
@@ -47,6 +48,7 @@ class OutdoorNavigationBrain @Inject constructor(
         crosswalkDetector.reset()
         junctionDetector.reset()
         turnAlignmentGuide.reset()
+        lateralGuidanceController.reset()
         depthPerceptionProvider.stop()
         depthCapabilities = null
         depthEnabled = false
@@ -174,6 +176,7 @@ class OutdoorNavigationBrain @Inject constructor(
             layout = streetLayout,
             corridor = corridor,
             dangerLevel = sidewalk.level,
+            yawRateDegPerSec = deviceRotationTracker.yawRateDegPerSec(),
         )
         lateral = lateralGuidanceController.frontalBoost(
             signal = lateral,
@@ -320,13 +323,14 @@ class OutdoorNavigationBrain @Inject constructor(
         }
 
         if (imuBeeps && navAlignment != null) {
+            // Fusionar giro Maps/IMU con lateral (muros): no sustituir, o te comes la pared.
             return MergedBeeps(
-                left = navAlignment.guideLeftBeep,
-                right = navAlignment.guideRightBeep,
-                continuous = navAlignment.continuousGuide,
-                warning = false,
+                left = maxOf(lateral.leftBeep, navAlignment.guideLeftBeep),
+                right = maxOf(lateral.rightBeep, navAlignment.guideRightBeep),
+                continuous = true,
+                warning = lateral.warning,
                 doorwayMode = true,
-                guidanceMode = false,
+                guidanceMode = lateral.guidanceMode || navAlignment.continuousGuide,
             )
         }
 

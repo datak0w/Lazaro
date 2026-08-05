@@ -495,6 +495,7 @@ private fun DebugMetricsPanel(
                 "Hardware: ${state.deviceLabel.ifBlank { "—" }} | " +
                     "modo ${depthModeLabel(state.depthGuidanceMode)} | " +
                     "percepción ${perceptionLabel(state.perceptionSource)} | " +
+                    "arnés ${if (state.harnessMountMode) "sí" else "no"} | " +
                     "dist. frontal ${state.frontalDistanceM?.let { "%.1f m".format(it) } ?: "—"}",
                 style = MaterialTheme.typography.bodySmall,
             )

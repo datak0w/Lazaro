@@ -13,4 +13,9 @@ data class PathGuideConfig(
     val sceneDescriptionIntervalSec: Int = 30,
     /** ARCore + LDAF en Pixel y dispositivos compatibles. */
     val depthEnhancedGuidance: Boolean = true,
+    /**
+     * Teléfono en arnés/clip a altura de pecho u ojos (POV wearable).
+     * Se activa solo al iniciar paseo o navegación; fuerza profundidad si el hardware la soporta.
+     */
+    val harnessMountMode: Boolean = false,
 )
