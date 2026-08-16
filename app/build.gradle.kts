@@ -36,6 +36,13 @@ android {
             "GEMINI_MODEL",
             "\"${localProperties.getProperty("GEMINI_MODEL", "gemini-3.5-flash")}\"",
         )
+        buildConfigField(
+            "String",
+            "GOOGLE_MAPS_API_KEY",
+            "\"${localProperties.getProperty("GOOGLE_MAPS_API_KEY", "")}\"",
+        )
+
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = localProperties.getProperty("GOOGLE_MAPS_API_KEY", "")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -89,6 +96,10 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.generativeai)
     implementation(libs.play.services.location)
+    implementation(libs.play.services.maps)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.gson)
+    implementation(libs.okhttp.logging)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.androidx.room.runtime)

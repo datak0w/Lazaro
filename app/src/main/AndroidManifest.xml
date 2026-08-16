@@ -42,19 +42,6 @@
         <package android:name="tunein.player" />
         <package android:name="com.google.android.apps.podcasts" />
         <package android:name="com.audible.application" />
-        <package android:name="com.google.android.apps.maps" />
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="https" android:host="www.google.com" android:pathPrefix="/maps" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="google.navigation" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="geo" />
-        </intent>
         <intent>
             <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
         </intent>
@@ -71,14 +58,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Lazaro">
-
-        <activity
-            android:name=".navigation.MapsLaunchActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:launchMode="singleInstance"
-            android:taskAffinity=""
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <activity
             android:name=".MainActivity"
@@ -147,6 +126,10 @@
         <meta-data
             android:name="com.google.ar.core"
             android:value="optional" />
+
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${GOOGLE_MAPS_API_KEY}" />
 
     </application>
 

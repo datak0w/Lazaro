@@ -15,7 +15,6 @@ class NavigationSessionManager @Inject constructor(
     private val pathGuideController: PathGuideController,
     private val textToSpeechManager: TextToSpeechManager,
     private val wakeWordController: WakeWordController,
-    private val mapsSessionCloser: MapsSessionCloser,
     private val mapsVisionFusionCoordinator: MapsVisionFusionCoordinator,
     private val hybridNavigationCoordinator: io.lazaro.routes.HybridNavigationCoordinator,
     private val activeSessionTracker: ActiveSessionTracker,
@@ -74,8 +73,6 @@ class NavigationSessionManager @Inject constructor(
             null
         }
         mapsVisionFusionCoordinator.reset()
-        mapsSessionCloser.closeMapsNavigation()
-        mapsSessionCloser.bringLazaroToFront()
         activeSessionTracker.clear()
         if (speakConfirmation) {
             val base = "Navegación terminada."

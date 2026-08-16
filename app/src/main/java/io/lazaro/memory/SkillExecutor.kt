@@ -6,7 +6,6 @@ import android.net.Uri
 import androidx.core.net.toUri
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.lazaro.actions.ActionResult
-import io.lazaro.actions.MapsLaunchDeferrer
 import io.lazaro.actions.NavigationAction
 import io.lazaro.memory.entity.SkillActionType
 import org.json.JSONObject
@@ -18,7 +17,6 @@ class SkillExecutor @Inject constructor(
     @ApplicationContext private val context: Context,
     private val memoryRepository: MemoryRepository,
     private val navigationAction: NavigationAction,
-    private val mapsLaunchDeferrer: MapsLaunchDeferrer,
 ) {
     suspend fun execute(skill: io.lazaro.memory.entity.CustomSkill): ActionResult {
         memoryRepository.incrementSkillUse(skill.id)
@@ -28,14 +26,7 @@ class SkillExecutor @Inject constructor(
             SkillActionType.NAVIGATE -> {
                 val destination = memoryRepository.resolveMemoryValue(skill.actionPayload)
                     ?: skill.actionPayload
-                mapsLaunchDeferrer.defer {
-                    navigationAction.launchWalkingNavigation(destination)
-                }
-                ActionResult.Success(
-                    "Te guío a pie hasta $destination. Abro Google Maps con voz. " +
-                        "Me callo para que oigas a Maps.",
-                    suspendListening = true,
-                )
+                navigationAction.navigateTo(destination)
             }
             SkillActionType.OPEN_URL -> openUrl(skill.actionPayload)
             SkillActionType.RECALL_MEMORY -> {

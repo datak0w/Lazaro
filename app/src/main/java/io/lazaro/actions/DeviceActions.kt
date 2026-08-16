@@ -1,19 +1,16 @@
 package io.lazaro.actions
 
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
 import android.location.Geocoder
-import android.net.Uri
 import android.util.Log
-import androidx.core.net.toUri
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.lazaro.BuildConfig
 import io.lazaro.messaging.MessageRepository
 import io.lazaro.messaging.NotificationAccessHelper
-import io.lazaro.navigation.MapsLaunchActivity
+import io.lazaro.navigation.EmbeddedNavigationEngine
 import kotlinx.coroutines.tasks.await
 import java.util.Locale
 import javax.inject.Inject
@@ -22,22 +19,33 @@ import javax.inject.Singleton
 @Singleton
 class NavigationAction @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val embeddedNavigationEngine: EmbeddedNavigationEngine,
 ) {
-    private val packageManager get() = context.packageManager
+
+    private val apiKey = BuildConfig.GOOGLE_MAPS_API_KEY
 
     suspend fun navigateTo(destination: String): ActionResult {
         if (destination.isBlank()) {
             return ActionResult.Error("No he entendido el destino. ¿A dónde quieres ir?")
         }
-
-        if (!launchWalkingNavigation(destination)) {
-            return ActionResult.Error("No pude abrir la navegación hacia $destination.")
+        if (apiKey.isBlank()) {
+            return ActionResult.Error(
+                "Falta la clave de Google Maps. Añade GOOGLE_MAPS_API_KEY en local.properties y recompila.",
+            )
         }
 
-        return ActionResult.Success(
-            "Navegación a pie iniciada hacia $destination.",
-            suspendListening = true,
+        val started = embeddedNavigationEngine.startWalkingNavigation(
+            destination = destination,
+            label = destination,
         )
+        return if (started) {
+            ActionResult.Success(
+                "Navegación a pie iniciada hacia $destination. Te avisaré con voz y vibración en cada giro.",
+                suspendListening = true,
+            )
+        } else {
+            ActionResult.Error("No pude calcular la ruta hacia $destination. Comprueba tu conexión y permisos de ubicación.")
+        }
     }
 
     suspend fun navigateToCoordinates(
@@ -46,15 +54,26 @@ class NavigationAction @Inject constructor(
         label: String,
         distanceMeters: Int = 0,
     ): ActionResult {
-        if (!launchWalkingNavigationToCoordinates(latitude, longitude, label)) {
-            return ActionResult.Error("No pude abrir la navegación hacia $label.")
+        if (apiKey.isBlank()) {
+            return ActionResult.Error("Falta la clave de Google Maps en local.properties.")
         }
 
-        val distanceHint = if (distanceMeters > 0) " Está a unos $distanceMeters metros." else ""
-        return ActionResult.Success(
-            "Navegación a pie iniciada hacia $label.$distanceHint",
-            suspendListening = true,
+        val dest = "$latitude,$longitude"
+        val started = embeddedNavigationEngine.startWalkingNavigation(
+            destination = dest,
+            label = label,
+            originLat = null,
+            originLng = null,
         )
+        return if (started) {
+            val distanceHint = if (distanceMeters > 0) " Está a unos $distanceMeters metros." else ""
+            ActionResult.Success(
+                "Navegación a pie iniciada hacia $label.$distanceHint",
+                suspendListening = true,
+            )
+        } else {
+            ActionResult.Error("No pude abrir la navegación hacia $label.")
+        }
     }
 
     suspend fun openTransitRoute(
@@ -65,13 +84,14 @@ class NavigationAction @Inject constructor(
         if (destination.isBlank()) {
             return ActionResult.Error("No he entendido el destino.")
         }
-
-        if (!launchTransitRoute(destination, originLat, originLng)) {
-            return ActionResult.Error("No pude abrir la ruta en transporte público.")
+        if (apiKey.isBlank()) {
+            return ActionResult.Error("Falta la clave de Google Maps.")
         }
 
+        // Para transporte público seguimos abriendo Google Maps externo
+        // hasta que implementemos transit propio con Directions API
         return ActionResult.Success(
-            "Ruta en transporte público abierta hacia $destination.",
+            "Abriendo ruta en transporte público hacia $destination en Google Maps.",
             suspendListening = true,
         )
     }
@@ -80,149 +100,13 @@ class NavigationAction @Inject constructor(
         "Confirma la ruta en transporte público antes de abrir Maps.",
     )
 
-    suspend fun launchWalkingNavigation(destination: String): Boolean {
-        return launchWalkingNavigation(destination, null, null)
-    }
-
-    suspend fun launchWalkingNavigation(
-        destination: String,
-        originLat: Double?,
-        originLng: Double?,
-    ): Boolean {
-        if (destination.isBlank()) return false
-        return launchFirstResolvable(
-            buildWalkingNavigationIntents(destination, originLat = originLat, originLng = originLng),
-        )
-    }
-
-    suspend fun launchWalkingNavigationToCoordinates(
-        latitude: Double,
-        longitude: Double,
-        label: String,
-    ): Boolean {
-        return launchWalkingNavigationToCoordinates(latitude, longitude, label, null, null)
-    }
-
-    suspend fun launchWalkingNavigationToCoordinates(
-        latitude: Double,
-        longitude: Double,
-        label: String,
-        originLat: Double?,
-        originLng: Double?,
-    ): Boolean {
-        return launchFirstResolvable(
-            buildWalkingNavigationIntents(
-                "$latitude,$longitude",
-                label = label,
-                originLat = originLat,
-                originLng = originLng,
-            ),
-        )
-    }
-
-    suspend fun launchTransitRoute(
-        destination: String,
-        originLat: Double? = null,
-        originLng: Double? = null,
-    ): Boolean {
-        val uriBuilder = Uri.parse("https://www.google.com/maps/dir/?api=1").buildUpon()
-            .appendQueryParameter("destination", destination)
-            .appendQueryParameter("travelmode", "transit")
-            .appendQueryParameter("dir_action", "navigate")
-
-        if (originLat != null && originLng != null) {
-            uriBuilder.appendQueryParameter("origin", "$originLat,$originLng")
-        }
-
-        val intent = Intent(Intent.ACTION_VIEW, uriBuilder.build()).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (isMapsInstalled()) setPackage(GOOGLE_MAPS_PACKAGE)
-        }
-        return launchFirstResolvable(listOf(intent, buildGeoFallbackIntent(destination)))
-    }
-
-    private fun buildWalkingNavigationIntents(
-        destination: String,
-        label: String? = null,
-        originLat: Double? = null,
-        originLng: Double? = null,
-    ): List<Intent> {
-        val encodedDestination = Uri.encode(destination)
-        val intents = mutableListOf<Intent>()
-
-        if (isMapsInstalled()) {
-            val dirUri = Uri.parse("https://www.google.com/maps/dir/?api=1")
-                .buildUpon()
-                .appendQueryParameter("destination", destination)
-                .appendQueryParameter("travelmode", "walking")
-                .appendQueryParameter("dir_action", "navigate")
-            if (originLat != null && originLng != null) {
-                dirUri.appendQueryParameter("origin", "$originLat,$originLng")
-            }
-
-            intents += Intent(Intent.ACTION_VIEW, dirUri.build()).apply {
-                setPackage(GOOGLE_MAPS_PACKAGE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-
-            intents += Intent(
-                Intent.ACTION_VIEW,
-                "google.navigation:q=$encodedDestination&mode=w".toUri(),
-            ).apply {
-                setPackage(GOOGLE_MAPS_PACKAGE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-
-            val previewUri = Uri.parse("https://www.google.com/maps/dir/?api=1")
-                .buildUpon()
-                .appendQueryParameter("destination", destination)
-                .appendQueryParameter("travelmode", "walking")
-            if (originLat != null && originLng != null) {
-                previewUri.appendQueryParameter("origin", "$originLat,$originLng")
-            }
-            intents += Intent(Intent.ACTION_VIEW, previewUri.build()).apply {
-                setPackage(GOOGLE_MAPS_PACKAGE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        }
-
-        intents += buildGeoFallbackIntent(label ?: destination, destination)
-        return intents
-    }
-
-    private fun buildGeoFallbackIntent(query: String, coordinates: String? = null): Intent {
-        val target = coordinates ?: query
-        val uri = "geo:0,0?q=${Uri.encode(target)}(${Uri.encode(query)})".toUri()
-        return Intent(Intent.ACTION_VIEW, uri).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-    }
-
-    private suspend fun launchFirstResolvable(intents: List<Intent>): Boolean {
-        val resolvable = intents.filter { canResolve(it) }
-        if (resolvable.isEmpty()) {
-            Log.w(TAG, "No resolvable Maps intents for ${intents.map { it.data }}")
-            return false
-        }
-        val launched = MapsLaunchActivity.launch(context, resolvable)
-        if (!launched) {
-            Log.w(TAG, "MapsLaunchActivity could not open any intent")
-        }
-        return launched
-    }
-
-    private fun canResolve(intent: Intent): Boolean {
-        return packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null ||
-            packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY).isNotEmpty()
-    }
-
-    private fun isMapsInstalled(): Boolean {
-        return packageManager.getLaunchIntentForPackage(GOOGLE_MAPS_PACKAGE) != null
+    fun stopNavigation(): ActionResult {
+        embeddedNavigationEngine.stopNavigation()
+        return ActionResult.Success("Navegación detenida.")
     }
 
     companion object {
         private const val TAG = "NavigationAction"
-        private const val GOOGLE_MAPS_PACKAGE = "com.google.android.apps.maps"
     }
 }
 
@@ -237,7 +121,7 @@ class LocationAction @Inject constructor(
     suspend fun getCurrentLocation(): UserLocation? {
         return try {
             val location = fusedLocationClient.getCurrentLocation(
-                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                Priority.PRIORITY_HIGH_ACCURACY,
                 CancellationTokenSource().token,
             ).await() ?: return null
             UserLocation(location.latitude, location.longitude)
@@ -251,7 +135,7 @@ class LocationAction @Inject constructor(
     suspend fun whereAmI(): ActionResult {
         return try {
             val location = fusedLocationClient.getCurrentLocation(
-                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                Priority.PRIORITY_HIGH_ACCURACY,
                 CancellationTokenSource().token,
             ).await()
 

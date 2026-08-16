@@ -45,7 +45,6 @@ class ActionExecutor @Inject constructor(
     private val timeAction: TimeAction,
     private val calculatorAction: CalculatorAction,
     private val receiptCheckerAction: ReceiptCheckerAction,
-    private val mapsLaunchDeferrer: MapsLaunchDeferrer,
     private val navigationIntentDetector: NavigationIntentDetector,
     private val walkModeIntentDetector: WalkModeIntentDetector,
     private val walkModeAction: WalkModeAction,
@@ -60,16 +59,6 @@ class ActionExecutor @Inject constructor(
     private var pendingConfirmation: PendingAction? = null
     private var pendingSkill: CustomSkill? = null
     private var lastPromptText: String = ""
-
-    fun hasDeferredMapsLaunch(): Boolean = mapsLaunchDeferrer.hasDeferred()
-
-    suspend fun runDeferredMapsLaunch(): Boolean {
-        return mapsLaunchDeferrer.runDeferred()
-    }
-
-    private fun deferMapsLaunch(launch: suspend () -> Boolean) {
-        mapsLaunchDeferrer.defer(launch)
-    }
 
     fun getLastPromptText(): String = lastPromptText
 
@@ -489,30 +478,11 @@ class ActionExecutor @Inject constructor(
                 if (pathGuideController.currentMode() == PathGuideMode.PASEO) {
                     pathGuideController.stop()
                 }
-                val location = locationAction.getCurrentLocation()
-                deferMapsLaunch {
-                    if (lat != null && lng != null) {
-                        navigationAction.launchWalkingNavigationToCoordinates(
-                            lat,
-                            lng,
-                            destination,
-                            location?.latitude,
-                            location?.longitude,
-                        )
-                    } else {
-                        navigationAction.launchWalkingNavigation(
-                            destination,
-                            location?.latitude,
-                            location?.longitude,
-                        )
-                    }
+                if (lat != null && lng != null) {
+                    navigationAction.navigateToCoordinates(lat, lng, destination)
+                } else {
+                    navigationAction.navigateTo(destination)
                 }
-                ActionResult.Success(
-                    "Vale, te guío a pie hasta $destination. " +
-                        "Abro Google Maps: Lazaro leerá cada giro y la cámara te guiará con pitidos. " +
-                        "Los avisos de ruta tienen prioridad. Di Lazaro si necesitas algo.",
-                    suspendListening = true,
-                )
             }
             "save_saved_place" -> savedPlaceAction.confirmSave(pending.args)
             "delete_saved_place" -> savedPlaceAction.confirmDelete(pending.args)
@@ -537,20 +507,7 @@ class ActionExecutor @Inject constructor(
                 if (lat == null || lng == null) {
                     ActionResult.Error("No tengo la parada lista.")
                 } else {
-                    val location = locationAction.getCurrentLocation()
-                    deferMapsLaunch {
-                        navigationAction.launchWalkingNavigationToCoordinates(
-                            lat,
-                            lng,
-                            stopName,
-                            location?.latitude,
-                            location?.longitude,
-                        )
-                    }
-                    ActionResult.Success(
-                        "Te guío a pie hasta $stopName. Lazaro te dira cada giro y vibrara al girar.",
-                        suspendListening = true,
-                    )
+                    navigationAction.navigateToCoordinates(lat, lng, stopName)
                 }
             }
             "plan_transit_route" -> {
@@ -558,14 +515,7 @@ class ActionExecutor @Inject constructor(
                 val location = locationAction.getCurrentLocation()
                 val originLat = location?.latitude
                 val originLng = location?.longitude
-                deferMapsLaunch {
-                    navigationAction.launchTransitRoute(destination, originLat, originLng)
-                }
-                ActionResult.Success(
-                    "Abro la ruta en transporte público hasta $destination. " +
-                        "Me callo mientras usas Maps. Di Lazaro o toca cuando quieras.",
-                    suspendListening = true,
-                )
+                navigationAction.openTransitRoute(destination, originLat, originLng)
             }
             else -> ActionResult.Error("Esta acción no requiere confirmación.")
         }
@@ -576,7 +526,6 @@ class ActionExecutor @Inject constructor(
         val wasResume = pending?.toolName == ToolName.ResumeActiveSession.id
         pendingConfirmation = null
         pendingSkill = null
-        mapsLaunchDeferrer.clear()
         lastPromptText = ""
         memoryActionHandler.rejectMemoryProposal()
         if (wasResume) {
