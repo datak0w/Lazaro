@@ -598,16 +598,11 @@ class AssistantController @Inject constructor(
                 enterNavigationPause()
             } else if (reply.suspendListening) {
                 conversationWindowJob?.cancel()
-                val mapsOk = if (actionExecutor.hasDeferredMapsLaunch()) {
-                    actionExecutor.runDeferredMapsLaunch()
-                } else {
-                    true
-                }
                 val navAlready =
                     navigationSessionManager.isNavigationActive() ||
                         pathGuideController.currentMode() == PathGuideMode.NAVEGACION ||
                         pathGuideController.currentMode() == PathGuideMode.RUTA
-                if (mapsOk || navAlready) {
+                if (navAlready) {
                     val label = extractNavigationLabel(text, spoken)
                     val routeReplay = pathGuideController.currentMode() == PathGuideMode.RUTA
                     if (!navigationSessionManager.isNavigationActive() ||

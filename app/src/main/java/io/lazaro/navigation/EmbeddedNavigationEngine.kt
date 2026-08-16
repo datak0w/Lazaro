@@ -60,7 +60,7 @@ class EmbeddedNavigationEngine @Inject constructor(
     /**
      * Inicia navegación embebida usando una ruta ya resuelta (modo híbrido / rutas guardadas).
      */
-    fun startWithRoute(route: Route, label: String) {
+    suspend fun startWithRoute(route: Route, label: String) {
         stopNavigation()
         textToSpeechManager.speak("Iniciando ruta guardada hacia $label.")
         routeFollower.start(route, label)
