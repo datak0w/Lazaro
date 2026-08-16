@@ -23,8 +23,8 @@ android {
         applicationId = "io.lazaro"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
+        versionName = "0.1.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
 
         buildConfigField(
             "String",
@@ -47,13 +47,30 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePath = localProperties.getProperty("RELEASE_KEYSTORE_PATH", "")
+            val keystorePassword = localProperties.getProperty("RELEASE_KEYSTORE_PASSWORD", "")
+            val keyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS", "")
+            val keyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD", "")
+            if (keystorePath.isNotBlank() && keystorePassword.isNotBlank()) {
+                storeFile = file(keystorePath)
+                storePassword = keystorePassword
+                keyAlias = keyAlias.ifBlank { "lazaro" }
+                keyPassword = keyPassword.ifBlank { keystorePassword }
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
