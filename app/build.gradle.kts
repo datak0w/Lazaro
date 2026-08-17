@@ -51,13 +51,13 @@ android {
         create("release") {
             val keystorePath = localProperties.getProperty("RELEASE_KEYSTORE_PATH", "")
             val keystorePassword = localProperties.getProperty("RELEASE_KEYSTORE_PASSWORD", "")
-            val keyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS", "")
-            val keyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD", "")
+            val alias = localProperties.getProperty("RELEASE_KEY_ALIAS", "").ifBlank { "lazaro" }
+            val keyPass = localProperties.getProperty("RELEASE_KEY_PASSWORD", "").ifBlank { keystorePassword }
             if (keystorePath.isNotBlank() && keystorePassword.isNotBlank()) {
                 storeFile = file(keystorePath)
                 storePassword = keystorePassword
-                keyAlias = keyAlias.ifBlank { "lazaro" }
-                keyPassword = keyPassword.ifBlank { keystorePassword }
+                keyAlias = alias
+                keyPassword = keyPass
             }
         }
     }

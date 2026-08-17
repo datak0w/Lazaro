@@ -65,6 +65,25 @@ GEMINI_MODEL=gemini-3.5-flash</code></pre>
       y recompilar. Otros proveedores (OpenAI, etc.) no están soportados aún.
     </p>
 
+    <h2>Clave de Google Maps (navegación embebida)</h2>
+    <p>
+      La navegación a pie usa la API de Google Maps dentro de la propia app
+      (sin abrir la app de Maps). Para que funcione necesitas una clave de
+      <a href="https://console.cloud.google.com/">Google Cloud Console</a>:
+    </p>
+    <ol>
+      <li>Crea un proyecto (o usa uno existente).</li>
+      <li>Activa las APIs: <strong>Maps SDK for Android</strong>, <strong>Directions API</strong> y <strong>Geolocation API</strong>.</li>
+      <li>Crea una clave API y restríngela al paquete <code>io.lazaro</code> (SHA-1 de tu firma de debug y de release).</li>
+      <li>Ponla en <code>local.properties</code>:</li>
+    </ol>
+<pre><code>GOOGLE_MAPS_API_KEY=AIza...</code></pre>
+    <aside class="warn" aria-label="Atención">
+      <span class="warn-label">Atención</span>
+      Si la clave falta o no está restringida, la app avisa al iniciar la navegación
+      y no puede calcular rutas.
+    </aside>
+
     <h2>Hardware recomendado</h2>
     <table>
       <caption>Dispositivos y capacidades</caption>

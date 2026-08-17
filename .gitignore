@@ -14,3 +14,7 @@
 .kombai/
 .vscode/
 .kotlin/
+
+# Firma release (NUNCA subir)
+*.keystore
+*.jks
