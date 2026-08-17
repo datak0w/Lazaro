@@ -16,6 +16,7 @@ import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.lazaro.cane.CaneConnectionState
 import io.lazaro.cane.CaneHandshakeState
+import io.lazaro.cane.CaneObstacleAlertManager
 import io.lazaro.cane.ScannedCaneDevice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -42,6 +44,7 @@ import kotlin.coroutines.resume
 class CaneBleManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val handshakeCapture: CaneHandshakeCapture,
+    private val caneObstacleAlertManager: CaneObstacleAlertManager,
 ) {
     private val bluetoothManager =
         context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -60,8 +63,62 @@ class CaneBleManager @Inject constructor(
     private val charMap = mutableMapOf<String, BluetoothGattCharacteristic>()
     private val subscribedUuids = mutableSetOf<String>()
     private var handshakeJob: Job? = null
+    private var obstaclePollJob: Job? = null
+    private var reconnectJob: Job? = null
     private var writeContinuation: ((Boolean) -> Unit)? = null
     private var descriptorContinuation: ((Boolean) -> Unit)? = null
+
+    @Volatile
+    private var autoReconnectEnabled = false
+
+    @Volatile
+    private var reconnectMac: String? = null
+
+    @Volatile
+    private var reconnectName: String? = null
+
+    @Volatile
+    private var reconnectAttempt = 0
+
+    @Volatile
+    private var sleepBlocked = false
+
+    /** Evita dependencia circular con Hilt; el FGS lo cablea. */
+    @Volatile
+    private var statusCue: io.lazaro.assistant.BlindStatusSpeaker? = null
+
+    fun bindStatusSpeaker(speaker: io.lazaro.assistant.BlindStatusSpeaker) {
+        statusCue = speaker
+    }
+
+    fun setSleepBlocked(blocked: Boolean) {
+        sleepBlocked = blocked
+        if (blocked) {
+            reconnectJob?.cancel()
+            reconnectJob = null
+        } else if (autoReconnectEnabled && !_state.value.isConnected) {
+            scheduleAutoReconnect(announceDisconnect = false)
+        }
+    }
+
+    /**
+     * Activa reintentos con backoff mientras haya MAC y el asistente esté activo.
+     */
+    fun enableAutoReconnect(mac: String, name: String?) {
+        reconnectMac = mac
+        reconnectName = name
+        autoReconnectEnabled = true
+        if (!_state.value.isConnected && !sleepBlocked) {
+            scheduleAutoReconnect(announceDisconnect = false)
+        }
+    }
+
+    fun disableAutoReconnect() {
+        autoReconnectEnabled = false
+        reconnectJob?.cancel()
+        reconnectJob = null
+        reconnectAttempt = 0
+    }
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -99,7 +156,10 @@ class CaneBleManager @Inject constructor(
                         handshakeCapture.info(note = "GATT conectado status=$status")
                     }
                     handshakeJob?.cancel()
+                    reconnectJob?.cancel()
+                    reconnectAttempt = 0
                     subscribedUuids.clear()
+                    val announceReady = autoReconnectEnabled && !_state.value.isConnected
                     _state.update {
                         it.copy(
                             isConnected = true,
@@ -114,6 +174,11 @@ class CaneBleManager @Inject constructor(
                     releaseSystemHidHost(gatt.device)
                     gatt.requestMtu(517)
                     gatt.readRemoteRssi()
+                    if (announceReady) {
+                        scope.launch {
+                            statusCue?.announceCaneReady()
+                        }
+                    }
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     Log.w(TAG, "Disconnected status=$status")
@@ -121,8 +186,10 @@ class CaneBleManager @Inject constructor(
                         handshakeCapture.info(note = "GATT desconectado status=$status")
                     }
                     handshakeJob?.cancel()
+                    stopObstaclePoll()
                     subscribedUuids.clear()
                     charMap.clear()
+                    val wasConnected = _state.value.isConnected
                     _state.update {
                         it.copy(
                             isConnected = false,
@@ -131,6 +198,9 @@ class CaneBleManager @Inject constructor(
                             handshakeState = CaneHandshakeState.PENDING,
                             handshakeDetail = null,
                         )
+                    }
+                    if (wasConnected || autoReconnectEnabled) {
+                        scheduleAutoReconnect(announceDisconnect = wasConnected)
                     }
                 }
             }
@@ -246,15 +316,22 @@ class CaneBleManager @Inject constructor(
     }
 
     fun connect(address: String, name: String? = null) {
+        connectInternal(address, name, autoConnect = false)
+    }
+
+    fun connect(device: ScannedCaneDevice) = connect(device.address, device.name)
+
+    private fun connectInternal(address: String, name: String?, autoConnect: Boolean) {
         stopScan()
         val device = adapter?.getRemoteDevice(address) ?: return
         gatt?.close()
         handshakeJob?.cancel()
+        stopObstaclePoll()
         subscribedUuids.clear()
-        gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        gatt = device.connectGatt(context, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
         _state.update {
             it.copy(
-                connectionLabel = "Conectando…",
+                connectionLabel = if (autoConnect) "Reconectando…" else "Conectando…",
                 deviceAddress = address,
                 deviceName = name ?: device.name,
                 handshakeState = CaneHandshakeState.PENDING,
@@ -263,10 +340,35 @@ class CaneBleManager @Inject constructor(
         }
     }
 
-    fun connect(device: ScannedCaneDevice) = connect(device.address, device.name)
+    private fun scheduleAutoReconnect(announceDisconnect: Boolean) {
+        if (!autoReconnectEnabled || sleepBlocked) return
+        val mac = reconnectMac ?: _state.value.deviceAddress ?: return
+        reconnectMac = mac
+        if (announceDisconnect) {
+            scope.launch { statusCue?.announceCaneDisconnected() }
+        }
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            while (isActive && autoReconnectEnabled && !sleepBlocked && !_state.value.isConnected) {
+                val delayMs = BACKOFF_MS[reconnectAttempt.coerceAtMost(BACKOFF_MS.lastIndex)]
+                Log.i(TAG, "Auto-reconnect attempt=${reconnectAttempt + 1} in ${delayMs}ms → $mac")
+                delay(delayMs)
+                if (!autoReconnectEnabled || sleepBlocked || _state.value.isConnected) break
+                val useAuto = reconnectAttempt > 0
+                reconnectAttempt++
+                try {
+                    connectInternal(mac, reconnectName, autoConnect = useAuto)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Auto-reconnect falló: ${e.message}")
+                }
+            }
+        }
+    }
 
     fun disconnect() {
+        disableAutoReconnect()
         handshakeJob?.cancel()
+        stopObstaclePoll()
         gatt?.disconnect()
         gatt?.close()
         gatt = null
@@ -368,6 +470,61 @@ class CaneBleManager @Inject constructor(
             )
         }
         Log.i(TAG, "Handshake listo p2p=$stillP2p hidBoot=$stillHid batteryTx=$txOk")
+
+        // Tras sesión: sondeo + poll periódico (status fe45 llega ~10 s si no pedimos).
+        if (txOk && finalState == CaneHandshakeState.READY) {
+            probeObstacleTelemetry()
+            startObstaclePoll()
+        }
+    }
+
+    /**
+     * Probes seguros post-sesión: re-sesión + C1/CA.
+     * Las respuestas (si existen) salen por NOTIFY y se etiquetan RX OBSTACLE?.
+     */
+    private suspend fun probeObstacleTelemetry() {
+        if (!charExists(WeWalkDevice.CHAR_TX_FE43)) return
+        _state.update { it.copy(handshakeDetail = "Sondeo telemetría obstáculo…") }
+        val steps = listOf(
+            "Re-sesión obstáculo" to WeWalkProtocol.buildFrame(
+                WeWalkProtocol.CMD_SESSION,
+                byteArrayOf(0x02),
+            ),
+            "Probe C1" to WeWalkProtocol.buildFrame(WeWalkProtocol.CMD_PROBE_C1),
+            "Probe CA" to WeWalkProtocol.buildFrame(WeWalkProtocol.CMD_PROBE_CA),
+        )
+        for ((label, data) in steps) {
+            val ok = writeBytes(WeWalkDevice.CHAR_TX_FE43, data)
+            Log.i(TAG, "Obstacle probe TX: $label ok=$ok")
+            delay(250)
+        }
+        _state.update { it.copy(handshakeDetail = "Listo. Acerca un obstáculo a altura de cabeza.") }
+    }
+
+    /** Pide telemetría suave ~cada 2 s solo por TX P2P (no escribir fe45: retrasa NOTIFY). */
+    private fun startObstaclePoll() {
+        stopObstaclePoll()
+        if (!charExists(WeWalkDevice.CHAR_TX_FE43)) return
+        obstaclePollJob = scope.launch {
+            while (isActive && _state.value.isConnected) {
+                delay(OBSTACLE_POLL_MS)
+                if (!_state.value.isConnected) break
+                try {
+                    writeBytes(
+                        WeWalkDevice.CHAR_TX_FE43,
+                        WeWalkProtocol.buildFrame(WeWalkProtocol.CMD_PROBE_C1),
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Obstacle poll: ${e.message}")
+                }
+            }
+        }
+        Log.i(TAG, "Obstacle poll ON cada ${OBSTACLE_POLL_MS}ms (solo fe43)")
+    }
+
+    private fun stopObstaclePoll() {
+        obstaclePollJob?.cancel()
+        obstaclePollJob = null
     }
 
     /** 0x00 = Boot Protocol Mode (Report Mode 0x01 exige 2A4D privilegiado en Samsung). */
@@ -591,6 +748,14 @@ class CaneBleManager @Inject constructor(
                     }
                 }
             }
+            if (!WeWalkProtocol.isKnownSessionCmd(frame.cmd)) {
+                Log.i(
+                    TAG,
+                    "RX OBSTACLE? PROTO cmd=0x${frame.cmd.toString(16).uppercase()} " +
+                        "payload=${frame.payload.joinToString(" ") { "%02X".format(it) }} " +
+                        "raw=$hex char=${WeWalkDevice.labelForUuid(charUuid) ?: charUuid}",
+                )
+            }
         }
 
         if (!WeWalkDevice.isMeaningfulPayload(hex)) return
@@ -603,6 +768,7 @@ class CaneBleManager @Inject constructor(
         }
 
         Log.i(TAG, "RX ${label ?: charUuid}: $hex")
+        logObstacleCandidate(charUuid, hex, value)
 
         _state.update {
             it.copy(
@@ -619,11 +785,75 @@ class CaneBleManager @Inject constructor(
         )
     }
 
+    /**
+     * Etiqueta payloads que no son botón P2P / HID / batería conocida,
+     * para correlacionar con detección ultrasónica en logcat.
+     */
+    private fun logObstacleCandidate(charUuid: String, hex: String, value: ByteArray) {
+        val uuid = charUuid.lowercase()
+        if (uuid == WeWalkDevice.CHAR_BATTERY.lowercase() ||
+            uuid == WeWalkDevice.CHAR_BATTERY_EXT.lowercase()
+        ) {
+            return
+        }
+        if (uuid == WeWalkDevice.CHAR_HID_REPORT.lowercase() ||
+            uuid == WeWalkDevice.CHAR_HID_BOOT_KB.lowercase() ||
+            uuid == WeWalkDevice.CHAR_NOTIFY_13.lowercase()
+        ) {
+            return
+        }
+        if (WeWalkP2pButtons.isP2pPress(charUuid, hex)) return
+
+        if (uuid == WeWalkDevice.CHAR_FE45.lowercase()) {
+            val fe = WeWalkObstacleParser.parseFe45(hex, value)
+            if (fe != null) {
+                Log.i(
+                    TAG,
+                    "RX FE45 ${fe.kind} len=${fe.length} batt=${fe.batteryHint ?: "-"} " +
+                        "dist=${fe.distanceCm ?: "-"}: $hex",
+                )
+                fe.distanceCm?.let { cm ->
+                    // Aviso inmediato (sin pasar por SharedFlow/collectLatest).
+                    caneObstacleAlertManager.onDistanceCm(cm)
+                    if (WeWalkObstacleParser.isObstacleDistance(cm)) {
+                        Log.i(TAG, "RX OBSTACLE fe45 dist=$cm cm")
+                    }
+                }
+                if (fe.kind != WeWalkObstacleParser.Fe45Frame.Kind.OTHER) {
+                    // Heartbeat/status: no emitir como botón.
+                    if (!WeWalkDevice.isMeaningfulPayload(hex)) return
+                    // Emitir eventos no-botón solo si aporta (status).
+                    if (fe.kind == WeWalkObstacleParser.Fe45Frame.Kind.STATUS) {
+                        _bleEvents.tryEmit(
+                            CaneBleEvent(
+                                charUuid = charUuid,
+                                hexPayload = hex,
+                                channelLabel = WeWalkDevice.labelForUuid(charUuid),
+                            ),
+                        )
+                    }
+                    return
+                }
+            }
+        }
+
+        val frame = WeWalkProtocol.parseFrame(value)
+        if (frame != null && WeWalkProtocol.isKnownSessionCmd(frame.cmd)) return
+
+        Log.i(
+            TAG,
+            "RX OBSTACLE? ${WeWalkDevice.labelForUuid(charUuid) ?: charUuid}: $hex",
+        )
+    }
+
     companion object {
         private const val TAG = "CaneBleManager"
         private const val NOTIFY_SETTLE_MS = 300L
         private const val WRITE_GAP_MS = 80L
         private const val GATT_OP_TIMEOUT_MS = 2500L
+        private const val OBSTACLE_POLL_MS = 2_000L
+        /** Backoff de reconexión: 2 → 5 → 15 → 30 s (tope). */
+        private val BACKOFF_MS = longArrayOf(2_000L, 5_000L, 15_000L, 30_000L)
         /** android.bluetooth.BluetoothProfile.HID_HOST (no expuesto en SDK app). */
         private const val HID_HOST_PROFILE = 4
         private const val CONNECTION_POLICY_FORBIDDEN = 0

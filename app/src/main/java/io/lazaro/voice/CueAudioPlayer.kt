@@ -9,6 +9,8 @@ import android.media.AudioTrack
 import android.os.Build
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.PI
@@ -16,20 +18,29 @@ import kotlin.math.sin
 
 /**
  * Reproduce cues PCM cortos por el mismo eje de volumen que TTS/asistencia.
- * Evita USAGE_ASSISTANCE_SONIFICATION (a menudo silenciado en Samsung/Pixel).
+ * [stopCurrent] corta el track al instante (evita solaparse con la voz).
  */
 @Singleton
 class CueAudioPlayer @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val abortPlayback = AtomicBoolean(false)
+    private val activeTrack = AtomicReference<AudioTrack?>(null)
+
+    /** Corta cualquier cue en curso (tono de espera, chirp, etc.). */
+    fun stopCurrent() {
+        abortPlayback.set(true)
+        releaseTrack(activeTrack.getAndSet(null))
+    }
 
     fun playMonoPcm(
         samples: ShortArray,
         sampleRate: Int = SAMPLE_RATE,
         amplitudeScale: Float = 1f,
-    ) {
-        if (samples.isEmpty()) return
+    ): Boolean {
+        if (samples.isEmpty()) return false
+        abortPlayback.set(false)
         val scaled = if (amplitudeScale == 1f) {
             samples
         } else {
@@ -40,8 +51,19 @@ class CueAudioPlayer @Inject constructor(
                     .toShort()
             }
         }
-        if (!playWithUsage(scaled, sampleRate, AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)) {
-            playWithUsage(scaled, sampleRate, AudioAttributes.USAGE_MEDIA)
+        if (abortPlayback.get()) return false
+        if (playWithUsage(scaled, sampleRate, AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)) {
+            return !abortPlayback.get()
+        }
+        if (abortPlayback.get()) return false
+        if (playWithUsage(scaled, sampleRate, AudioAttributes.USAGE_MEDIA)) {
+            return !abortPlayback.get()
+        }
+        if (abortPlayback.get()) return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            playWithUsage(scaled, sampleRate, AudioAttributes.USAGE_ASSISTANT) && !abortPlayback.get()
+        } else {
+            false
         }
     }
 
@@ -96,6 +118,7 @@ class CueAudioPlayer @Inject constructor(
     }
 
     private fun playWithUsage(samples: ShortArray, sampleRate: Int, usage: Int): Boolean {
+        if (abortPlayback.get()) return false
         val focus = requestFocus(usage)
         return try {
             playStatic(samples, sampleRate, usage) || playStream(samples, sampleRate, usage)
@@ -107,6 +130,7 @@ class CueAudioPlayer @Inject constructor(
     private fun playStatic(samples: ShortArray, sampleRate: Int, usage: Int): Boolean {
         var track: AudioTrack? = null
         return try {
+            if (abortPlayback.get()) return false
             val bytes = samples.size * 2
             track = AudioTrack.Builder()
                 .setAudioAttributes(attributes(usage))
@@ -115,6 +139,7 @@ class CueAudioPlayer @Inject constructor(
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .setSessionId(AudioManager.AUDIO_SESSION_ID_GENERATE)
                 .build()
+            activeTrack.set(track)
             @Suppress("DEPRECATION")
             track.setVolume(1f)
             val written = track.write(samples, 0, samples.size)
@@ -122,14 +147,16 @@ class CueAudioPlayer @Inject constructor(
                 Log.w(TAG, "STATIC write corto written=$written expected=${samples.size}")
                 return false
             }
+            if (abortPlayback.get()) return false
             track.play()
             val durationMs = (samples.size * 1000L / sampleRate) + 40L
-            Thread.sleep(durationMs)
-            true
+            sleepInterruptible(durationMs)
+            !abortPlayback.get()
         } catch (e: Exception) {
             Log.w(TAG, "STATIC falló usage=$usage: ${e.message}")
             false
         } finally {
+            if (activeTrack.get() === track) activeTrack.compareAndSet(track, null)
             releaseTrack(track)
         }
     }
@@ -137,6 +164,7 @@ class CueAudioPlayer @Inject constructor(
     private fun playStream(samples: ShortArray, sampleRate: Int, usage: Int): Boolean {
         var track: AudioTrack? = null
         return try {
+            if (abortPlayback.get()) return false
             val min = minBuffer(sampleRate)
             track = AudioTrack.Builder()
                 .setAudioAttributes(attributes(usage))
@@ -145,23 +173,40 @@ class CueAudioPlayer @Inject constructor(
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .setSessionId(AudioManager.AUDIO_SESSION_ID_GENERATE)
                 .build()
+            activeTrack.set(track)
             @Suppress("DEPRECATION")
             track.setVolume(1f)
             track.play()
             var offset = 0
-            while (offset < samples.size) {
+            while (offset < samples.size && !abortPlayback.get()) {
                 val n = track.write(samples, offset, samples.size - offset)
                 if (n <= 0) break
                 offset += n
             }
+            if (abortPlayback.get()) return false
             val durationMs = (samples.size * 1000L / sampleRate) + 40L
-            Thread.sleep(durationMs)
-            track.playState == AudioTrack.PLAYSTATE_PLAYING || offset > 0
+            sleepInterruptible(durationMs)
+            !abortPlayback.get() && offset > 0
         } catch (e: Exception) {
             Log.w(TAG, "STREAM falló usage=$usage: ${e.message}")
             false
         } finally {
+            if (activeTrack.get() === track) activeTrack.compareAndSet(track, null)
             releaseTrack(track)
+        }
+    }
+
+    private fun sleepInterruptible(durationMs: Long) {
+        var left = durationMs.coerceAtLeast(0L)
+        while (left > 0 && !abortPlayback.get()) {
+            val slice = left.coerceAtMost(40L)
+            try {
+                Thread.sleep(slice)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
+            }
+            left -= slice
         }
     }
 
@@ -228,7 +273,15 @@ class CueAudioPlayer @Inject constructor(
     private fun releaseTrack(track: AudioTrack?) {
         if (track == null) return
         try {
-            if (track.playState == AudioTrack.PLAYSTATE_PLAYING) track.stop()
+            if (track.playState == AudioTrack.PLAYSTATE_PLAYING) track.pause()
+        } catch (_: Exception) {
+        }
+        try {
+            track.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            track.flush()
         } catch (_: Exception) {
         }
         try {

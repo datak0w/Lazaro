@@ -29,9 +29,23 @@ class RouteRepository @Inject constructor(
     }
 
     suspend fun findRouteNearEnd(lat: Double, lng: Double, radiusM: Double = 150.0): SavedRoute? {
-        return routeDao.getAllRoutes().firstOrNull { route ->
-            haversineM(route.endLat, route.endLng, lat, lng) <= radiusM
-        }
+        return routeDao.getAllRoutes()
+            .filter { route -> haversineM(route.endLat, route.endLng, lat, lng) <= radiusM }
+            .maxByOrNull { it.updatedAt }
+    }
+
+    suspend fun findRouteByNameOrLabel(query: String): SavedRoute? {
+        val n = query.trim().lowercase()
+        if (n.isBlank()) return null
+        return routeDao.getAllRoutes()
+            .filter {
+                it.name.lowercase() == n ||
+                    it.destinationKey?.lowercase() == n ||
+                    it.destinationLabel?.lowercase() == n ||
+                    it.name.lowercase().contains(n) ||
+                    it.destinationLabel?.lowercase()?.contains(n) == true
+            }
+            .maxByOrNull { it.updatedAt }
     }
 
     suspend fun insertRoute(route: SavedRoute): Long = routeDao.insertRoute(route)

@@ -43,7 +43,27 @@ class BlindNavigationPhraseBuilderTest {
         )
         assertTrue(tip.startsWith("Gira a la izquierda."))
         assertTrue(tip.contains("30"))
-        assertTrue(!tip.contains("acera", ignoreCase = true))
+        assertTrue(tip.contains("acera", ignoreCase = true))
+        assertTrue(tip.contains("izquierda"))
+    }
+
+    @Test
+    fun nextManeuverAndMilestonePhrases() {
+        assertEquals(
+            "En unos 40 metros, gira a la izquierda.",
+            BlindNavigationPhraseBuilder.announceNextManeuver(
+                BlindNavigationPhraseBuilder.Action.TURN_LEFT,
+                40,
+            ),
+        )
+        assertTrue(
+            BlindNavigationPhraseBuilder.announceDistanceMilestone(100, "Bar Sol")
+                .contains("100"),
+        )
+        assertTrue(
+            BlindNavigationPhraseBuilder.announceCalibrateHeading("Farmacia")
+                .contains("orientar"),
+        )
     }
 
     @Test

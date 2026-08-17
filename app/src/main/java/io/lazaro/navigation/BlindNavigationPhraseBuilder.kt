@@ -70,11 +70,96 @@ object BlindNavigationPhraseBuilder {
         return parts.joinToString(" ").trim()
     }
 
+    /**
+     * Resumen de arranque con plan OSRM: destino, ETA, metros y primera calle.
+     */
+    fun announceRouteStart(
+        label: String,
+        totalDistanceM: Int,
+        etaMinutes: Int,
+        firstStreet: String?,
+        firstAction: Action,
+    ): String {
+        val name = label.trim().ifBlank { "tu destino" }
+        val meters = totalDistanceM.coerceAtLeast(10)
+        val roundedM = if (meters >= 100) (meters / 10) * 10 else meters
+        val minutes = etaMinutes.coerceAtLeast(1)
+        val parts = mutableListOf(
+            "Hacia $name. Unos $minutes minutos, $roundedM metros.",
+        )
+        val street = firstStreet?.trim()?.takeIf { it.length >= 2 }
+        if (street != null) {
+            parts.add("Primero por $street.")
+        } else {
+            parts.add(primaryTip(firstAction).trimEnd('.') + ".")
+        }
+        return parts.joinToString(" ").trim()
+    }
+
     /** Tip de seguimiento propio (sin dependencia de Maps). */
     fun announceOwnGuidance(action: Action, distanceM: Int): String {
         val parts = mutableListOf(primaryTip(action))
         distancePhrase(distanceM)?.let { parts.add(it) }
         return parts.joinToString(" ").trim()
+    }
+
+    /** Anticipa el próximo giro OSRM a N metros (opcionalmente a calle). */
+    fun announceNextManeuver(
+        action: Action,
+        distanceM: Int,
+        streetName: String? = null,
+    ): String {
+        val dist = distanceM.coerceIn(5, 400)
+        val verb = when (action) {
+            Action.TURN_LEFT -> "gira a la izquierda"
+            Action.TURN_RIGHT -> "gira a la derecha"
+            Action.U_TURN -> "da la vuelta"
+            Action.CROSS -> "cruza la calle"
+            Action.ARRIVE -> "llegas a tu destino"
+            Action.FORWARD -> "sigue recto"
+            Action.OTHER -> "sigue la indicación"
+        }
+        val street = streetName?.trim()?.takeIf { it.length >= 2 }
+        val toward = if (street != null && action != Action.ARRIVE) " a $street" else ""
+        return when {
+            dist <= 15 -> "Ahora, $verb$toward."
+            dist <= 35 -> "En unos $dist metros, $verb$toward."
+            else -> "En unos $dist metros, $verb$toward."
+        }
+    }
+
+    /** Hito de distancia restante al destino (con ETA opcional). */
+    fun announceDistanceMilestone(
+        metersLeft: Int,
+        label: String = "tu destino",
+        etaMinutes: Int? = null,
+    ): String {
+        val name = label.trim().ifBlank { "tu destino" }
+        val rounded = when {
+            metersLeft <= 30 -> metersLeft.coerceAtLeast(5)
+            metersLeft <= 100 -> (metersLeft / 5) * 5
+            else -> (metersLeft / 10) * 10
+        }
+        val eta = etaMinutes?.takeIf { it >= 1 }?.let { " Unos $it minutos." }.orEmpty()
+        return "Quedan unos $rounded metros hasta $name.$eta"
+    }
+
+    fun announceOffRouteRecalc(): String =
+        "Te saliste de la ruta. Recalculando."
+
+    fun announceCrossingAhead(distanceM: Int): String {
+        val d = distanceM.coerceIn(5, 120)
+        return if (d <= 20) {
+            "Cruce peatonal cerca. Cruza con cuidado."
+        } else {
+            "Cruce peatonal a unos $d metros."
+        }
+    }
+
+    /** Sin brújula/GPS bearing: pedir calibración al caminar. */
+    fun announceCalibrateHeading(label: String): String {
+        val name = label.trim().ifBlank { "tu destino" }
+        return "Para llegar a $name: camina unos pasos para orientar el teléfono."
     }
 
     private fun distancePhrase(meters: Int): String? {
@@ -90,8 +175,8 @@ object BlindNavigationPhraseBuilder {
     /**
      * Anuncio completo al llegar un aviso de Maps:
      * 1) acción clara Lazaro
-     * 2) contexto de acera (cámara) si lo hay
-     * 3) detalle útil de Maps (calle / metros) si aporta
+     * 2) detalle útil de Maps (calle / metros) si aporta
+     * 3) cola corta de acera en giros/cruces si la visión aporta lado seguro
      */
     fun announceFromMaps(
         instruction: String,
@@ -104,8 +189,21 @@ object BlindNavigationPhraseBuilder {
 
         distanceHint(instruction)?.let { parts.add(it) }
         streetNameHint(instruction, action)?.let { parts.add(it) }
+        if (action == Action.TURN_LEFT || action == Action.TURN_RIGHT ||
+            action == Action.CROSS || action == Action.U_TURN
+        ) {
+            sidewalkHint(streetLayout)?.let { parts.add(it) }
+        }
 
         return parts.joinToString(" ").trim()
+    }
+
+    private fun sidewalkHint(streetLayout: StreetLayoutState?): String? {
+        return when (streetLayout?.safeSide) {
+            RoadSide.LEFT -> "Mantén la acera a tu izquierda."
+            RoadSide.RIGHT -> "Mantén la acera a tu derecha."
+            else -> null
+        }
     }
 
     /** Tip durante el giro (IMU + Maps): grados restantes → precisión. */

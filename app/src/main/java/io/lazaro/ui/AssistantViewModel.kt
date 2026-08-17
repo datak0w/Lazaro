@@ -61,6 +61,9 @@ class AssistantViewModel @Inject constructor(
             add(Manifest.permission.ACCESS_COARSE_LOCATION)
             add(Manifest.permission.READ_CONTACTS)
             add(Manifest.permission.CALL_PHONE)
+            add(Manifest.permission.READ_PHONE_STATE)
+            add(Manifest.permission.READ_CALL_LOG)
+            add(Manifest.permission.ANSWER_PHONE_CALLS)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }

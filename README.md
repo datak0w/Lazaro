@@ -315,13 +315,13 @@ Si tienes una **ruta grabada** o un **sitio guardado**, Lazaro te lo propondrá 
 
 ## 🧭 Navegación accesible
 
-Lazaro AI **no sustituye** Google Maps: lo **complementa** para personas ciegas.
+La guía peatonal corre **dentro de Lázaro** (sin abrir la app Google Maps).
 
 1. Confirmas el destino por voz.
-2. Se abre **Google Maps** en modo peatonal.
-3. Lazaro **lee** las instrucciones de Maps en voz natural:
-   - *«Ahora, gira a la derecha en Calle Mayor»*
-4. En cada **giro**, el móvil **vibra** de forma distinta según el lado.
+2. Si hay una **ruta grabada** a ese destino, se ofrece primero.
+3. Si no, se calcula una ruta a pie con **Google Directions** (clave `MAPS_API_KEY`) y, si falla, **OSRM**.
+4. Lázaro habla los giros en español claro y vibra según el lado.
+5. En paralelo, la cámara detecta objetos **en el móvil** (MediaPipe) y avisa con frases cortas + pitidos.
 
 ### Vibración en giros
 
@@ -333,8 +333,8 @@ Lazaro AI **no sustituye** Google Maps: lo **complementa** para personas ciegas.
 
 ### Para que funcione bien
 
-- ✅ Google Maps instalado y actualizado
-- ✅ **Acceso a notificaciones** activado para Lazaro AI
+- ✅ `MAPS_API_KEY` en `local.properties` (Directions). Sin clave, usa OSRM.
+- ✅ GPS y cámara concedidos
 - ✅ Volumen de medios audible
 
 ---
@@ -342,13 +342,13 @@ Lazaro AI **no sustituye** Google Maps: lo **complementa** para personas ciegas.
 ## 📷 Guía por cámara y rutas grabadas
 
 ### Modo paseo
-La cámara trasera analiza el espacio y emite **pitidos** más fuertes hacia donde hay más sitio libre. También avisa de obstáculos con frases cortas.
+La cámara trasera analiza el espacio y emite **pitidos** más fuertes hacia donde hay más sitio libre. **MediaPipe Object Detector** (local, ~8 Hz) nombra objetos útiles para peatón ciego (*«persona a la izquierda»*, *«coche delante»*) y refuerza los pitidos si hay obstáculo frontal. Gemini **no** se usa en automático al caminar: solo si pides *«qué ves?»* o el botón de escena del bastón.
 
 ### Rutas grabadas (ideal para Ojén → casa)
 1. **Graba** el trayecto caminando: acera en el pueblo, camino rural, árboles…
 2. Lazaro guarda el **perfil espacial** (lado seguro, giros, distancias).
 3. La próxima vez que digas **«llévame a casa»**, ofrece la ruta guardada.
-4. **Maps** lleva el tramo urbano; **Lazaro** retoma la guía fina donde ya pasaste antes.
+4. La **ruta grabada** tiene prioridad sobre Directions genérico; Lázaro retoma la guía fina donde ya pasaste.
 
 > Cada nueva grabación **mejora** la ruta (como un mapa dibujado entre varios paseos).
 
@@ -482,11 +482,13 @@ Cámara trasera (CameraX)
         ↓
 WalkableCorridorEstimator   ← IPM monocular + bordes (A34)
         ↓                   ← profundidad LDAF / ARCore (Pixel 9, opcional)
+MediaPipe Object Detector   ← LIVE_STREAM, EfficientDet-Lite0 (local)
+        ↓
 LateralGuidanceController   ← error lateral → pitidos proporcionales
         ↓
-OutdoorNavigationBrain      ← acera, puertas, bifurcaciones, Maps
+OutdoorNavigationBrain      ← acera, puertas, bifurcaciones, ruta in-app
         ↓
-StereoBeepEngine            ← salida estéreo L/R
+StereoBeepEngine            ← salida estéreo L/R (+ refuerzo frontal)
 ```
 
 ### Hardware recomendado
@@ -547,9 +549,19 @@ cp local.properties.example local.properties
 ```properties
 GEMINI_API_KEY=tu_clave_aqui
 GEMINI_MODEL=gemini-3.5-flash
+# Google Maps Platform (Directions API + Maps SDK).
+# Pon la clave AQUÍ, en local.properties (no se sube a Git).
+# Cloud Console: activa billing, Directions API y Maps SDK for Android.
+MAPS_API_KEY=tu_clave_maps_aqui
 ```
 
-> Sin clave Gemini, muchas funciones locales siguen funcionando (navegación, paseo, tiempo, noticias…). La IA mejora el diálogo libre y la memoria inteligente.
+La app lee `MAPS_API_KEY` desde `local.properties` y la inyecta en:
+- `BuildConfig.MAPS_API_KEY` (Directions HTTP)
+- `AndroidManifest` meta-data `com.google.android.geo.API_KEY` (Maps SDK)
+
+> Sin clave Gemini, muchas funciones locales siguen funcionando (navegación, paseo, tiempo, noticias…). La IA mejora el diálogo libre, la memoria y *«qué ves?»*.
+>
+> Sin `MAPS_API_KEY`, la guía peatonal in-app usa **OSRM** como respaldo. Con clave, prioriza **Google Directions** (sin abrir la app Maps).
 
 ---
 
@@ -574,7 +586,7 @@ GEMINI_MODEL=gemini-3.5-flash
 
 - Android SDK, API 26+
 - JDK 17
-- Clave Gemini en `local.properties` (no subir a Git)
+- Clave Gemini y (opcional) Maps en `local.properties` (no subir a Git)
 
 ### Compilar
 
@@ -618,7 +630,7 @@ GeminiOrchestrator → ActionExecutor
               PathGuideController ← Cámara + pitidos
 ```
 
-**Stack:** Kotlin · Jetpack Compose · Hilt · Room · Gemini · Vosk · ML Kit · CameraX · ARCore · OpenStreetMap · GeoJSON
+**Stack:** Kotlin · Jetpack Compose · Hilt · Room · Gemini · Vosk · MediaPipe · ML Kit · CameraX · ARCore · Google Directions · OpenStreetMap · GeoJSON
 
 ### Módulos PathGuide (navegación espacial)
 
@@ -702,7 +714,8 @@ Lazaro AI integra software libre, APIs abiertas y sensores del móvil. Todo lo c
 | **CameraX** | Preview + análisis de frames (A34, Pixel LDAF) |
 | **Camera2Interop** | Metadatos autofocus / LDAF (`LENS_FOCUS_DISTANCE`) |
 | **ARCore Depth API** | Mapa de profundidad en Pixel 9 (modo `ARCORE_DEPTH`) |
-| **ML Kit** | Etiquetado de escena y OCR (tickets) |
+| **MediaPipe Object Detector** | Detección local en vivo (EfficientDet-Lite0) durante navegación/paseo |
+| **ML Kit** | Apoyo de etiquetas y OCR; *«qué ves?»* sigue usando Gemini |
 | **IPM monocular** | Vista cenital del corredor caminable (sin LiDAR) |
 
 Modos de profundidad (`DepthGuidanceMode`):

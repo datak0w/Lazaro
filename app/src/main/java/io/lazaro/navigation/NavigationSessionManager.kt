@@ -20,6 +20,7 @@ class NavigationSessionManager @Inject constructor(
     private val mapsVisionFusionCoordinator: MapsVisionFusionCoordinator,
     private val hybridNavigationCoordinator: io.lazaro.routes.HybridNavigationCoordinator,
     private val activeSessionTracker: ActiveSessionTracker,
+    private val navigationSceneLookCoordinator: NavigationSceneLookCoordinator,
 ) {
     private var currentTarget: NavigationTarget? = null
 
@@ -56,14 +57,15 @@ class NavigationSessionManager @Inject constructor(
         if (!routeReplay && kind == ActiveSessionKind.NAVIGATION) {
             ownNavigationGuide.start(resolvedTarget.copy(label = resolvedLabel))
         }
+        navigationSceneLookCoordinator.onNavigationStarted()
     }
 
-    /** Pausa anuncios de Maps para chat; no cierra la navegación. */
+    /** Pausa anuncios de Maps para chat; conserva destino y ruta propia. */
     fun pauseForChat() {
         if (!isNavigationActive() && !activeSessionTracker.hasActiveSession()) return
         activeSessionTracker.pauseForChat()
         navigationGuidanceMonitor.setMapsSpeechMuted(true)
-        ownNavigationGuide.stop()
+        ownNavigationGuide.pauseTips()
     }
 
     /** Reanuda anuncios de Maps tras el chat. */
@@ -74,8 +76,21 @@ class NavigationSessionManager @Inject constructor(
         if (!navigationGuidanceMonitor.isNavigationActive()) {
             navigationGuidanceMonitor.startNavigation()
         }
-        currentTarget?.let { ownNavigationGuide.start(it.copy(label = snap.label)) }
+        if (ownNavigationGuide.hasRoute()) {
+            ownNavigationGuide.resumeTips()
+        } else {
+            currentTarget?.let { ownNavigationGuide.start(it.copy(label = snap.label)) }
+        }
         return "De acuerdo. Seguimos hacia ${snap.label}."
+    }
+
+    fun currentTarget(): NavigationTarget? = currentTarget
+
+    suspend fun describeGuidanceContext(): String {
+        if (!ownNavigationGuide.hasRoute() && currentTarget == null) {
+            return "No hay navegación activa."
+        }
+        return ownNavigationGuide.snapshot().describeBrief()
     }
 
     suspend fun endSession(speakConfirmation: Boolean = true) {
@@ -92,6 +107,7 @@ class NavigationSessionManager @Inject constructor(
         mapsVisionFusionCoordinator.reset()
         mapsSessionCloser.closeMapsNavigation()
         mapsSessionCloser.bringLazaroToFront()
+        navigationSceneLookCoordinator.onNavigationStopped()
         activeSessionTracker.clear()
         currentTarget = null
         if (speakConfirmation) {

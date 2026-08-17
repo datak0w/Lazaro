@@ -9,6 +9,7 @@ hilt = "2.52"
 ksp = "2.0.21-1.0.28"
 generativeai = "0.9.0"
 playServicesLocation = "21.3.0"
+playServicesMaps = "19.0.0"
 coroutines = "1.9.0"
 navigation = "2.8.5"
 room = "2.6.1"
@@ -19,6 +20,7 @@ camerax = "1.4.1"
 arcore = "1.44.0"
 mlkitLabeling = "17.0.9"
 mlkitTextRecognition = "16.0.1"
+mediapipeTasksVision = "0.10.21"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -38,6 +40,7 @@ hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.r
 hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version = "1.2.0" }
 generativeai = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "generativeai" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
+play-services-maps = { group = "com.google.android.gms", name = "play-services-maps", version.ref = "playServicesMaps" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
@@ -52,6 +55,7 @@ androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycl
 google-ar-core = { group = "com.google.ar", name = "core", version.ref = "arcore" }
 mlkit-image-labeling = { group = "com.google.mlkit", name = "image-labeling", version.ref = "mlkitLabeling" }
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
+mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision", version.ref = "mediapipeTasksVision" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -160,6 +160,36 @@ object ToolDefinitions {
                     parameters = emptyList(),
                     requiredParameters = emptyList(),
                 ),
+                FunctionDeclaration(
+                    name = "manage_alarm",
+                    description = "Gestiona alarmas del teléfono: poner, cambiar, cancelar, apagar si suena, o listar.",
+                    parameters = listOf(
+                        Schema.str(
+                            "action",
+                            "set, change, cancel, stop o list",
+                        ),
+                        Schema.str("hour", "Hora 0-23. Obligatoria en set; en change es la nueva hora."),
+                        Schema.str("minute", "Minuto 0-59. Default 0."),
+                        Schema.str(
+                            "from_hour",
+                            "Hora de la alarma a cambiar/cancelar. Opcional.",
+                        ),
+                        Schema.str(
+                            "from_minute",
+                            "Minuto de la alarma a cambiar/cancelar. Opcional.",
+                        ),
+                        Schema.str("label", "Etiqueta opcional de la alarma."),
+                    ),
+                    requiredParameters = listOf("action"),
+                ),
+                FunctionDeclaration(
+                    name = "describe_scene",
+                    description = "Hace una foto con la cámara trasera y describe qué hay delante " +
+                        "(obstáculos, calzada/acera, puntos de referencia) y si hay sitios guardados cerca. " +
+                        "Úsalo cuando el usuario diga dime qué ves, qué hay delante, mira delante, etc.",
+                    parameters = emptyList(),
+                    requiredParameters = emptyList(),
+                ),
             ),
         ),
     )

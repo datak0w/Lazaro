@@ -73,6 +73,6 @@ class ConversationContext @Inject constructor() {
     }
 
     companion object {
-        const val MAX_TURNS = 6
+        const val MAX_TURNS = 8
     }
 }

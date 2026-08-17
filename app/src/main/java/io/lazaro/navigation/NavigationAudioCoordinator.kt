@@ -125,6 +125,36 @@ class NavigationAudioCoordinator @Inject constructor() {
         mapsCooldownUntilMs = System.currentTimeMillis() + MAPS_BEEP_COOLDOWN_MS
     }
 
+    /**
+     * Abre ventana de giro IMU / fusión desde un step OSRM propio
+     * (cuando Maps no ha anunciado la maniobra).
+     */
+    fun openOwnTurnWindow(
+        side: TurnSide?,
+        type: MapsInstructionType = MapsInstructionType.TURN,
+    ) {
+        if (!navigationActive.get()) return
+        val now = System.currentTimeMillis()
+        lastInstructionType = type
+        lastTurnSide = side
+        when (type) {
+            MapsInstructionType.TURN, MapsInstructionType.ROUNDABOUT ->
+                turnWindowUntilMs = now + TURN_WINDOW_MS
+            MapsInstructionType.CROSS_STREET ->
+                crossSearchUntilMs = now + CROSS_SEARCH_MS
+            else -> Unit
+        }
+        if (side == TurnSide.U_TURN) {
+            turnWindowUntilMs = now + TURN_WINDOW_MS
+        }
+    }
+
+    fun openOwnCrossSearch() {
+        if (!navigationActive.get()) return
+        lastInstructionType = MapsInstructionType.CROSS_STREET
+        crossSearchUntilMs = System.currentTimeMillis() + CROSS_SEARCH_MS
+    }
+
     fun shouldDuckBeeps(): Boolean {
         if (!navigationActive.get()) return false
         if (replaySegmentActive.get()) return false
@@ -153,6 +183,13 @@ class NavigationAudioCoordinator @Inject constructor() {
         return true
     }
 
+    /** Tras una descripción de escena: deja hueco antes del próximo tip. */
+    fun markSceneDescriptionSpoken() {
+        val now = System.currentTimeMillis()
+        lastMapsInstructionMs = now
+        mapsCooldownUntilMs = now + SCENE_AFTER_COOLDOWN_MS
+    }
+
     fun lastTurnSide(): TurnSide? = lastTurnSide
 
     fun updateCameraContext(layout: StreetLayoutState, frontalBlocked: Boolean) {
@@ -172,6 +209,7 @@ class NavigationAudioCoordinator @Inject constructor() {
         private const val MAPS_BEEP_COOLDOWN_MS = 1_800L
         private const val MIN_GAP_PATHGUIDE_SPEECH_MS = 4_000L
         private const val MIN_GAP_SCENE_MS = 12_000L
+        private const val SCENE_AFTER_COOLDOWN_MS = 3_500L
         private const val TURN_WINDOW_MS = 22_000L
         const val NAV_SCENE_INTERVAL_SEC = 60
         private const val CROSS_SEARCH_MS = 15_000L

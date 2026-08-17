@@ -23,6 +23,7 @@ class CaneLowBatteryMonitor @Inject constructor(
     private val caneBleManager: CaneBleManager,
     private val batteryAction: BatteryAction,
     private val textToSpeechManager: TextToSpeechManager,
+    private val sleepModeController: io.lazaro.assistant.SleepModeController,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var loopJob: Job? = null
@@ -48,6 +49,7 @@ class CaneLowBatteryMonitor @Inject constructor(
     }
 
     private suspend fun maybeWarn() {
+        if (sleepModeController.isSleeping()) return
         val state = caneBleManager.state.value
         if (!state.isConnected) return
         val pct = BatteryAction.sanitizePercent(state.batteryPercent) ?: return

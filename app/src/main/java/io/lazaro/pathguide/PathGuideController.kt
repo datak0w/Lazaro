@@ -7,10 +7,15 @@ import android.util.Log
 import androidx.camera.core.ImageProxy
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.lazaro.cane.CaneObstacleAlertManager
 import io.lazaro.navigation.NavigationAudioCoordinator
 import io.lazaro.navigation.NavigationGuidanceMonitor
+import io.lazaro.navigation.OwnNavigationGuide
+import io.lazaro.navigation.PreferredSidewalkSide
+import io.lazaro.navigation.StreetSidePreferenceRepository
 import io.lazaro.navigation.TurnSide
 import io.lazaro.voice.TextToSpeechManager
+import dagger.Lazy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,7 +32,6 @@ import io.lazaro.routes.replay.RouteReplayBrain
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import dagger.Lazy
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -39,7 +43,6 @@ class PathGuideController @Inject constructor(
     private val depthHardwareDetector: DepthHardwareDetector,
     private val stereoBeepEngine: StereoBeepEngine,
     private val doorwayGuideAnnouncer: DoorwayGuideAnnouncer,
-    private val obstacleLabeler: ObstacleLabeler,
     private val bypassAdvisor: BypassAdvisor,
     private val sceneDescriber: SceneDescriber,
     private val sceneDescriptionAnnouncer: SceneDescriptionAnnouncer,
@@ -55,6 +58,11 @@ class PathGuideController @Inject constructor(
     private val routeReplayBrain: RouteReplayBrain,
     private val hybridNavigationCoordinator: Lazy<HybridNavigationCoordinator>,
     private val highAccuracyLocationProvider: HighAccuracyLocationProvider,
+    private val caneObstacleAlertManager: CaneObstacleAlertManager,
+    private val streetSidePreferenceRepository: StreetSidePreferenceRepository,
+    private val ownNavigationGuide: Lazy<OwnNavigationGuide>,
+    private val liveObjectDetector: MediaPipeLiveObjectDetector,
+    private val pedestrianObjectAnnouncer: PedestrianObjectAnnouncer,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pathGuideAnalyzer = PathGuideAnalyzer()
@@ -110,9 +118,11 @@ class PathGuideController @Inject constructor(
         }
         scope.launch {
             textToSpeechManager.isSpeaking.collect { speaking ->
+                if (!spatialBeepsEnabled(_mode.value)) {
+                    stereoBeepEngine.setPaused(true)
+                    return@collect
+                }
                 val streetGuide = _mode.value == PathGuideMode.PASEO ||
-                    _mode.value == PathGuideMode.NAVEGACION ||
-                    _mode.value == PathGuideMode.RUTA ||
                     _mode.value == PathGuideMode.DEBUG ||
                     _mode.value == PathGuideMode.GRABANDO
                 // En calle: no callar por TTS genérico; solo Maps o anuncio activo.
@@ -131,6 +141,40 @@ class PathGuideController @Inject constructor(
     fun isActive(): Boolean = _mode.value != PathGuideMode.OFF
 
     fun currentMode(): PathGuideMode = _mode.value
+
+    /** Silencio total en modo dormir: sin pitidos ni cues de path guide. */
+    @Volatile
+    private var sleepMuted = false
+
+    fun setSleepMuted(muted: Boolean) {
+        sleepMuted = muted
+        if (muted) {
+            stereoBeepEngine.update(0f, 0f)
+            stereoBeepEngine.setPaused(true)
+        } else {
+            refreshBeepPause()
+        }
+    }
+
+    fun isSleepMuted(): Boolean = sleepMuted
+
+    /** Pistas de profundidad/obstáculo para enriquecer «dime qué ves». */
+    fun sensorVisionHints(): String? {
+        if (_mode.value == PathGuideMode.OFF) return null
+        val parts = mutableListOf<String>()
+        lastFrontalDistanceM?.takeIf { it in 0.2f..8f }?.let { d ->
+            val meters = if (d < 1f) "menos de un metro" else "unos ${d.toInt().coerceAtLeast(1)} metros"
+            parts += "Sensor: obstáculo o suelo cercano delante a $meters"
+        }
+        liveObjectDetector.latestDetections().takeIf { it.isNotEmpty() }?.let { dets ->
+            val summary = dets.take(3).joinToString(", ") { it.phrase }
+            parts += "Objetos locales: $summary"
+        }
+        lastLabel?.takeIf { it.isNotBlank() && it != "camino" }?.let { label ->
+            parts += "Etiqueta local: $label"
+        }
+        return parts.takeIf { it.isNotEmpty() }?.joinToString(". ")
+    }
 
     suspend fun start(mode: PathGuideMode, routeId: Long? = null): Boolean {
         if (!config.enabled) return false
@@ -151,6 +195,8 @@ class PathGuideController @Inject constructor(
         routeReplayBrain.reset()
         doorwayGuideAnnouncer.reset()
         sceneDescriptionAnnouncer.reset()
+        pedestrianObjectAnnouncer.reset()
+        liveObjectDetector.ensureStarted()
         frontalStableMs = 0L
         lastFrameMs = 0L
         lastSceneDescriptionMs = 0L
@@ -187,7 +233,12 @@ class PathGuideController @Inject constructor(
         lastHarnessMountMode = harnessActive
         outdoorNavigationBrain.configureDepth(depthCaps, streetMode)
         deviceRotationTracker.start()
-        stereoBeepEngine.start()
+        // Pitidos L/R también en navegación y ruta (ducking si habla TTS).
+        if (spatialBeepsEnabled(mode)) {
+            stereoBeepEngine.start()
+        } else {
+            stereoBeepEngine.stop()
+        }
 
         foregroundBridge.promoteCameraForeground(includeCamera = true)
 
@@ -195,6 +246,11 @@ class PathGuideController @Inject constructor(
         if (!started) {
             stop()
             return false
+        }
+        pathGuideCameraHost.activeCapabilities()?.let { caps ->
+            lastDepthGuidanceMode = caps.mode
+            lastDeviceLabel = caps.deviceLabel
+            outdoorNavigationBrain.configureDepth(caps, streetMode)
         }
         return true
     }
@@ -209,8 +265,19 @@ class PathGuideController @Inject constructor(
         foregroundBridge.promoteCameraForeground(includeCamera = false)
         announcing = false
         frontalStableMs = 0L
+        val oldDebug = _debugState.value
         _debugState.value = null
+        oldDebug?.frame?.let { bmp ->
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                try {
+                    if (!bmp.isRecycled) bmp.recycle()
+                } catch (_: Exception) {
+                }
+            }, 600L)
+        }
         pathGuideCameraHost.stop()
+        liveObjectDetector.stop()
+        pedestrianObjectAnnouncer.reset()
         deviceRotationTracker.stop()
         stereoBeepEngine.stop()
         turnAlignmentGuide.reset()
@@ -233,6 +300,11 @@ class PathGuideController @Inject constructor(
         var closeInFinally = true
         try {
             if (_mode.value == PathGuideMode.OFF) return
+            if (sleepMuted) {
+                stereoBeepEngine.update(0f, 0f)
+                stereoBeepEngine.setPaused(true)
+                return
+            }
 
             val now = System.currentTimeMillis()
             if (lastFrameMs == 0L) lastFrameMs = now
@@ -298,6 +370,31 @@ class PathGuideController @Inject constructor(
             lastFrontalDistanceM = brain.frontalDistanceM
             lastMapsInstructionType = brain.mapsInstructionType
 
+            liveObjectDetector.submitFrame(image, gray, width, height)
+            val detections = liveObjectDetector.latestDetections()
+            liveObjectDetector.primaryLabel()?.let { lastLabel = it }
+            pedestrianObjectAnnouncer.consider(
+                detections = detections,
+                mode = currentMode,
+                sleepMuted = sleepMuted,
+                announcingOther = announcing,
+                canSpeak = { urgent -> canSpeakPathGuide(urgent) },
+            )
+
+            // Aviso frontal instantáneo (cámara/profundidad). El ultrasonido BLE del bastón
+            // llega tarde; aquí es el canal principal de voz.
+            if (currentMode == PathGuideMode.NAVEGACION ||
+                currentMode == PathGuideMode.PASEO ||
+                currentMode == PathGuideMode.RUTA ||
+                currentMode == PathGuideMode.DEBUG
+            ) {
+                caneObstacleAlertManager.onCameraFrontal(
+                    distanceM = brain.frontalDistanceM,
+                    severity = corridor.frontalSeverity,
+                    blocked = corridor.isFrontallyBlocked && corridor.frontalSeverity >= 0.35f,
+                )
+            }
+
             if (currentMode == PathGuideMode.GRABANDO) {
                 handleRecordingFrame(corridor, brain, now)
             }
@@ -328,7 +425,7 @@ class PathGuideController @Inject constructor(
 
             // Preview DEBUG: aplica pitidos de acera/giro
             if (_mode.value == PathGuideMode.DEBUG) {
-                stereoBeepEngine.update(
+                pushStereoBeeps(
                     brain.leftBeep,
                     brain.rightBeep,
                     doorwayMode = brain.doorwayMode,
@@ -350,16 +447,20 @@ class PathGuideController @Inject constructor(
                 currentMode == PathGuideMode.PASEO ||
                 currentMode == PathGuideMode.RUTA
 
-            if (shouldSilenceBeepsForMaps() &&
+            // Navegación / ruta: pitidos L/R + refuerzo si MediaPipe ve obstáculo frontal.
+            if (!spatialBeepsEnabled(currentMode)) {
+                stereoBeepEngine.update(0f, 0f)
+                stereoBeepEngine.setPaused(true)
+            } else if (shouldSilenceBeepsForMaps() &&
                 brain.outdoorPhase != OutdoorNavPhase.DRIFT_WARNING &&
                 brain.sidewalkAlignment != SidewalkAlignment.ON_ROAD &&
                 brain.sidewalkAlignment != SidewalkAlignment.DRIFTING_TO_ROAD &&
-                brain.leftBeep < 0.05f && brain.rightBeep < 0.05f
+                brain.leftBeep < 0.05f && brain.rightBeep < 0.05f &&
+                liveObjectDetector.frontalBeepBoost() < 0.22f
             ) {
                 stereoBeepEngine.update(0f, 0f)
             } else if (brain.isExitGuiding || streetMode || currentMode == PathGuideMode.GRABANDO) {
-                // Pitidos espaciales siempre (paseo / nav / grabación)
-                stereoBeepEngine.update(
+                pushStereoBeeps(
                     brain.leftBeep,
                     brain.rightBeep,
                     doorwayMode = true, // umbral más sensible para guía
@@ -369,6 +470,9 @@ class PathGuideController @Inject constructor(
                     warningMode = brain.warningMode,
                     guidanceMode = brain.guidanceMode,
                 )
+            }
+
+            if (brain.isExitGuiding || streetMode || currentMode == PathGuideMode.GRABANDO) {
                 val voiceCue = brain.voiceCue?.takeIf { cue ->
                     cue.cueId !in SIDEWALK_VOICE_BLOCKLIST &&
                         cue.cueId != "imu_aligned" && (
@@ -390,7 +494,7 @@ class PathGuideController @Inject constructor(
                 maybeAnnounceExitCue(voiceCue)
                 return
             } else {
-                stereoBeepEngine.update(
+                pushStereoBeeps(
                     brain.leftBeep,
                     brain.rightBeep,
                     doorwayMode = brain.doorwayMode,
@@ -416,22 +520,14 @@ class PathGuideController @Inject constructor(
 
             if (brain.shouldAnnounceFrontal && !announcing && canSpeakPathGuide(urgent = true)) {
                 announcing = true
-                val snapshotCorridor = corridor
                 scope.launch {
                     try {
                         stereoBeepEngine.setPaused(true)
                         io.lazaro.navigation.TurnHapticFeedback.pulseObstacle(context)
-                        val advice = bypassAdvisor.advise(snapshotCorridor)
-                        val message = SpatialPhraseBuilder.frontalObstaclePhrase(
-                            label = "obstáculo",
-                            corridor = snapshotCorridor,
-                            advice = advice,
-                            mode = _mode.value,
-                        )
-                        textToSpeechManager.initialize()
-                        textToSpeechManager.speak(message)
+                        // La frase la lanza CaneObstacleAlertManager (onCameraFrontal).
+                        // Aquí solo háptico + reset de estado.
                     } catch (e: Exception) {
-                        Log.e(TAG, "Error anunciando obstáculo frontal", e)
+                        Log.e(TAG, "Error en háptico de obstáculo frontal", e)
                     } finally {
                         announcing = false
                         frontalStableMs = 0L
@@ -454,7 +550,9 @@ class PathGuideController @Inject constructor(
     }
 
     private fun onAlignedSuccess() {
-        stereoBeepEngine.playSuccessCoin()
+        if (spatialBeepsEnabled(_mode.value)) {
+            stereoBeepEngine.playSuccessCoin()
+        }
         io.lazaro.navigation.TurnHapticFeedback.pulseAligned(context)
         if (!announcing && canSpeakPathGuide(urgent = true)) {
             maybeAnnounceExitCue(
@@ -481,6 +579,7 @@ class PathGuideController @Inject constructor(
     }
 
     private fun maybeAnnounceExitCue(cue: DoorwayVoiceCue?) {
+        if (sleepMuted) return
         if (cue == null || announcing || !config.doorwayAlertsEnabled) return
         val isImuCue = cue.cueId.startsWith("imu_")
         if (_mode.value == PathGuideMode.NAVEGACION || _mode.value == PathGuideMode.RUTA) {
@@ -504,14 +603,22 @@ class PathGuideController @Inject constructor(
     }
 
     private fun refreshBeepPause() {
-        val streetGuide = _mode.value == PathGuideMode.PASEO ||
-            _mode.value == PathGuideMode.NAVEGACION ||
-            _mode.value == PathGuideMode.RUTA ||
-            _mode.value == PathGuideMode.DEBUG ||
-            _mode.value == PathGuideMode.GRABANDO
+        if (sleepMuted || !spatialBeepsEnabled(_mode.value)) {
+            stereoBeepEngine.setPaused(true)
+            return
+        }
         stereoBeepEngine.setPaused(
-            announcing || (streetGuide && navigationAudioCoordinator.shouldDuckBeeps()),
+            announcing || navigationAudioCoordinator.shouldDuckBeeps(),
         )
+    }
+
+    /** Pitidos L/R en paseo, debug, grabación, navegación y ruta. */
+    private fun spatialBeepsEnabled(mode: PathGuideMode): Boolean {
+        return mode == PathGuideMode.PASEO ||
+            mode == PathGuideMode.DEBUG ||
+            mode == PathGuideMode.GRABANDO ||
+            mode == PathGuideMode.NAVEGACION ||
+            mode == PathGuideMode.RUTA
     }
 
     private fun maybeAnnounceDoorwayCue(cue: DoorwayVoiceCue?) {
@@ -535,12 +642,12 @@ class PathGuideController @Inject constructor(
         if (now - lastDebugPublishMs < DEBUG_FRAME_MS) return
         lastDebugPublishMs = now
         try {
-            _debugState.value?.frame?.recycle()
-            val bitmap = GrayBitmapConverter.toBitmap(gray, width, height)
+            val previous = _debugState.value
+            val bitmap = GrayBitmapConverter.toBitmap(gray, width, height, maxSide = 720)
             _debugState.value = PathGuideDebugState(
                 frame = bitmap,
-                frameWidth = width,
-                frameHeight = height,
+                frameWidth = bitmap.width,
+                frameHeight = bitmap.height,
                 mode = _mode.value,
                 corridor = corridor,
                 doorwayPhase = doorwayPhase,
@@ -584,6 +691,15 @@ class PathGuideController @Inject constructor(
                 frontalDistanceM = lastFrontalDistanceM,
                 updatedAtMs = now,
             )
+            // No reciclar en el mismo frame: Compose puede seguir dibujando el bitmap anterior.
+            previous?.frame?.let { old ->
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        if (!old.isRecycled) old.recycle()
+                    } catch (_: Exception) {
+                    }
+                }, 600L)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error publicando debug", e)
         }
@@ -599,14 +715,59 @@ class PathGuideController @Inject constructor(
         return navigationAudioCoordinator.canPathGuideSpeak(urgent)
     }
 
-    private fun applyNavigationTurnBias(left: Float, right: Float): Pair<Float, Float> {
-        if (_mode.value != PathGuideMode.NAVEGACION && _mode.value != PathGuideMode.RUTA) return left to right
-        return when (navigationAudioCoordinator.lastTurnSide()) {
-            TurnSide.LEFT -> left to right * 0.65f
-            TurnSide.RIGHT -> left * 0.65f to right
-            TurnSide.U_TURN -> left * 0.8f to right * 0.8f
-            null -> left to right
+    private fun pushStereoBeeps(
+        left: Float,
+        right: Float,
+        doorwayMode: Boolean = false,
+        continuousTone: Boolean = false,
+        warningMode: Boolean = false,
+        guidanceMode: Boolean = false,
+    ) {
+        var l = left
+        var r = right
+        var warning = warningMode
+        var continuous = continuousTone
+        val boost = liveObjectDetector.frontalBeepBoost()
+        if (boost >= 0.22f) {
+            l = maxOf(l, boost)
+            r = maxOf(r, boost)
+            warning = true
+            continuous = true
         }
+        val biased = applyNavigationTurnBias(l, r)
+        stereoBeepEngine.update(
+            biased.first,
+            biased.second,
+            doorwayMode = doorwayMode,
+            continuousTone = continuous,
+            warningMode = warning,
+            guidanceMode = guidanceMode,
+        )
+    }
+
+    private fun applyNavigationTurnBias(left: Float, right: Float): Pair<Float, Float> {
+        if (_mode.value != PathGuideMode.NAVEGACION && _mode.value != PathGuideMode.RUTA) {
+            return left to right
+        }
+        var l = left
+        var r = right
+        when (navigationAudioCoordinator.lastTurnSide()) {
+            TurnSide.LEFT -> r *= 0.65f
+            TurnSide.RIGHT -> l *= 0.65f
+            TurnSide.U_TURN -> {
+                l *= 0.8f
+                r *= 0.8f
+            }
+            null -> Unit
+        }
+        // Preferencia de acera: empuja pitidos hacia el lado guardado
+        val street = ownNavigationGuide.get().currentStreetCached()
+        when (streetSidePreferenceRepository.cachedPreference(street)?.preferredSide) {
+            PreferredSidewalkSide.LEFT -> r *= 0.55f
+            PreferredSidewalkSide.RIGHT -> l *= 0.55f
+            else -> Unit
+        }
+        return l to r
     }
 
     private fun hasCameraPermission(): Boolean {

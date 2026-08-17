@@ -16,6 +16,22 @@ interface MessageDao {
     @Query("SELECT COUNT(*) FROM incoming_messages WHERE read = 0")
     suspend fun countUnread(): Int
 
+    @Query(
+        """
+        SELECT COUNT(*) FROM incoming_messages
+        WHERE packageName = :packageName
+          AND sender = :sender
+          AND text = :text
+          AND timestamp >= :sinceMs
+        """,
+    )
+    suspend fun countSimilarSince(
+        packageName: String,
+        sender: String,
+        text: String,
+        sinceMs: Long,
+    ): Int
+
     @Query("UPDATE incoming_messages SET read = 1 WHERE read = 0")
     suspend fun markAllRead()
 

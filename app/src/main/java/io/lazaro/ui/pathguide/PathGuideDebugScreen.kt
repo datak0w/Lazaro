@@ -21,10 +21,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
@@ -100,7 +102,14 @@ fun PathGuideDebugScreen(
 
 @Composable
 private fun CameraDebugPreview(state: PathGuideDebugState) {
-    val bitmap = state.frame
+    val imageBitmap: ImageBitmap? = remember(state.updatedAtMs) {
+        try {
+            val bmp = state.frame
+            if (bmp.isRecycled) null else bmp.asImageBitmap()
+        } catch (_: Exception) {
+            null
+        }
+    }
     Column(modifier = Modifier.fillMaxWidth()) {
         androidx.compose.foundation.layout.Box(
             modifier = Modifier
@@ -108,15 +117,17 @@ private fun CameraDebugPreview(state: PathGuideDebugState) {
                 .height(360.dp)
                 .background(Color.Black),
         ) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Vista cámara trasera",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-            )
+            if (imageBitmap != null) {
+                Image(
+                    bitmap = imageBitmap,
+                    contentDescription = "Vista cámara trasera",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val scaleX = size.width / state.frameWidth
-                val scaleY = size.height / state.frameHeight
+                val scaleX = size.width / state.frameWidth.coerceAtLeast(1)
+                val scaleY = size.height / state.frameHeight.coerceAtLeast(1)
                 val scale = minOf(scaleX, scaleY)
                 val offsetX = (size.width - state.frameWidth * scale) / 2f
                 val offsetY = (size.height - state.frameHeight * scale) / 2f
@@ -534,7 +545,7 @@ private fun DebugMetricsPanel(
             Text("Puerta: no detectada | fase ${doorwayPhaseLabel(state.doorwayPhase)}")
         }
         Text("Barandilla: desactivada (escaleras fuera de servicio)")
-        state.lastLabel?.let { Text("Último objeto ML: $it") }
+        state.lastLabel?.let { Text("Último objeto MediaPipe: $it") }
         state.lastSceneDescription?.let {
             Text("Última escena: $it", style = MaterialTheme.typography.bodySmall)
         }

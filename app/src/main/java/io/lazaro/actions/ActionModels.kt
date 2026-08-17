@@ -34,6 +34,8 @@ enum class ToolName(val id: String) {
     ListSavedRoutes("list_saved_routes"),
     ListSavedPlaces("list_saved_places"),
     ResumeActiveSession("resume_active_session"),
+    ManageAlarm("manage_alarm"),
+    DescribeScene("describe_scene"),
     ;
 
     companion object {

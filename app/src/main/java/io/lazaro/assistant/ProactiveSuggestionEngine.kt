@@ -19,6 +19,7 @@ class ProactiveSuggestionEngine @Inject constructor(
     private val routeRepository: RouteRepository,
     private val pathGuideController: PathGuideController,
     private val activeSessionTracker: ActiveSessionTracker,
+    private val sleepModeController: SleepModeController,
 ) {
     @Volatile
     private var lastSuggestionMs = 0L
@@ -46,7 +47,7 @@ class ProactiveSuggestionEngine @Inject constructor(
     suspend fun suggestionAfterSideOrder(): String? {
         val session = activeSessionTracker.snapshot() ?: return null
         if (session.phase != ActiveSessionPhase.PAUSED_FOR_CHAT) return null
-        if (!canSuggest(minGapMs = 8_000L)) return null
+        if (!canSuggest(minGapMs = SIDE_ORDER_GAP_MS)) return null
         markSuggested()
         activeSessionTracker.markAwaitingResumePrompt(true)
         return session.resumeQuestion()
@@ -87,6 +88,7 @@ class ProactiveSuggestionEngine @Inject constructor(
     }
 
     private fun canSuggest(minGapMs: Long = DEBOUNCE_MS): Boolean {
+        if (sleepModeController.isSleeping()) return false
         return System.currentTimeMillis() - lastSuggestionMs >= minGapMs
     }
 
@@ -95,6 +97,9 @@ class ProactiveSuggestionEngine @Inject constructor(
     }
 
     companion object {
-        private const val DEBOUNCE_MS = 150_000L
+        /** Tips espontáneos: como mucho cada 10 min. */
+        private const val DEBOUNCE_MS = 600_000L
+        /** Oferta «¿Seguimos…?» tras orden lateral. */
+        private const val SIDE_ORDER_GAP_MS = 30_000L
     }
 }

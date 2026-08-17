@@ -1,7 +1,14 @@
 package io.lazaro.routes
 
+import android.content.Context
+import android.location.Geocoder
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.lazaro.memory.MemoryRepository
+import io.lazaro.memory.SavedPlaceRepository
 import io.lazaro.routes.entity.SavedRoute
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -13,8 +20,10 @@ data class ResolvedRoute(
 
 @Singleton
 class RouteResolver @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val routeRepository: RouteRepository,
     private val memoryRepository: MemoryRepository,
+    private val savedPlaceRepository: SavedPlaceRepository,
 ) {
     suspend fun resolveForDestination(destinationRaw: String): ResolvedRoute? {
         val normalized = destinationRaw.trim().lowercase()
@@ -22,6 +31,7 @@ class RouteResolver @Inject constructor(
             ?: memoryRepository.resolveMemoryValue(destinationRaw.trim())
         val label = memoryValue ?: destinationRaw.trim()
 
+        // 1) Enlace explícito memoria → ruta
         routeRepository.findRouteByMemoryKey(normalized)?.let { route ->
             return ResolvedRoute(route, label, normalized)
         }
@@ -35,12 +45,23 @@ class RouteResolver @Inject constructor(
             }
         }
 
-        if (memoryValue != null) {
-            val geocoded = geocodeApprox(memoryValue)
-            if (geocoded != null) {
-                routeRepository.findRouteNearEnd(geocoded.first, geocoded.second)?.let { route ->
-                    return ResolvedRoute(route, label, normalized)
-                }
+        // 2) Por nombre / etiqueta de destino
+        routeRepository.findRouteByNameOrLabel(destinationRaw.trim())?.let { route ->
+            return ResolvedRoute(route, label, route.destinationKey)
+        }
+
+        // 3) Sitio guardado cerca del extremo de una ruta
+        savedPlaceRepository.resolvePlace(destinationRaw)?.let { place ->
+            routeRepository.findRouteNearEnd(place.latitude, place.longitude)?.let { route ->
+                return ResolvedRoute(route, place.displayName, normalized)
+            }
+        }
+
+        // 4) Geocodificar destino y buscar ruta cuyo extremo coincida
+        val geocoded = geocodeApprox(memoryValue ?: destinationRaw.trim())
+        if (geocoded != null) {
+            routeRepository.findRouteNearEnd(geocoded.first, geocoded.second)?.let { route ->
+                return ResolvedRoute(route, label, normalized)
             }
         }
 
@@ -57,6 +78,16 @@ class RouteResolver @Inject constructor(
     }
 
     private suspend fun geocodeApprox(address: String): Pair<Double, Double>? {
-        return null
+        if (address.isBlank() || !Geocoder.isPresent()) return null
+        return withContext(Dispatchers.IO) {
+            try {
+                @Suppress("DEPRECATION")
+                val results = Geocoder(context, Locale("es", "ES")).getFromLocationName(address, 1)
+                val first = results?.firstOrNull() ?: return@withContext null
+                first.latitude to first.longitude
+            } catch (_: Exception) {
+                null
+            }
+        }
     }
 }

@@ -25,7 +25,9 @@ class OjenMapBundle @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private var footways: List<OsmWay> = emptyList()
+    private var crossings: List<OsmCrossing> = emptyList()
     private var loaded = false
+    private var crossingsLoaded = false
 
     suspend fun ensureLoaded(): Boolean = withContext(Dispatchers.IO) {
         if (loaded) return@withContext true
@@ -43,6 +45,50 @@ class OjenMapBundle @Inject constructor(
             loaded = footways.isNotEmpty()
         }
         loaded
+    }
+
+    /** Carga cruces peatonales OSM (bbox Ojén). Independiente del bundle de footways. */
+    suspend fun ensureCrossingsLoaded(): Boolean = withContext(Dispatchers.IO) {
+        if (crossingsLoaded && crossings.isNotEmpty()) return@withContext true
+        val cache = crossingsCacheFile()
+        if (cache.exists()) {
+            crossings = parseCrossings(cache.readText())
+            crossingsLoaded = crossings.isNotEmpty()
+            if (crossingsLoaded) return@withContext true
+        }
+        val downloaded = downloadCrossingsOverpass()
+        if (downloaded.isNotBlank()) {
+            cache.parentFile?.mkdirs()
+            cache.writeText(downloaded)
+            crossings = parseCrossings(downloaded)
+            crossingsLoaded = crossings.isNotEmpty()
+        }
+        crossingsLoaded
+    }
+
+    /**
+     * Cruce peatonal más cercano dentro de [radiusM], solo si la posición está en bbox Ojén.
+     */
+    suspend fun nearestCrossing(lat: Double, lng: Double, radiusM: Double): CrossingHint? {
+        if (!isInOjenBbox(lat, lng)) return null
+        ensureCrossingsLoaded()
+        if (crossings.isEmpty()) return null
+        var best: OsmCrossing? = null
+        var bestDist = Double.MAX_VALUE
+        for (c in crossings) {
+            val d = haversineM(lat, lng, c.lat, c.lng)
+            if (d < bestDist) {
+                bestDist = d
+                best = c
+            }
+        }
+        val hit = best ?: return null
+        if (bestDist > radiusM) return null
+        return CrossingHint(lat = hit.lat, lng = hit.lng, distanceM = bestDist)
+    }
+
+    fun isInOjenBbox(lat: Double, lng: Double): Boolean {
+        return lat in BBOX_SOUTH..BBOX_NORTH && lng in BBOX_WEST..BBOX_EAST
     }
 
     fun classifySegment(lat: Double, lng: Double): SegmentTerrain {
@@ -132,6 +178,65 @@ class OjenMapBundle @Inject constructor(
 
     private fun cacheFile(): File = File(context.filesDir, "maps/ojen_footways.json")
 
+    private fun crossingsCacheFile(): File = File(context.filesDir, "maps/ojen_crossings.json")
+
+    private suspend fun downloadCrossingsOverpass(): String = withContext(Dispatchers.IO) {
+        try {
+            val query = """
+                [out:json][timeout:25];
+                (
+                  node["highway"="crossing"](${BBOX_SOUTH},${BBOX_WEST},${BBOX_NORTH},${BBOX_EAST});
+                  node["footway"="crossing"](${BBOX_SOUTH},${BBOX_WEST},${BBOX_NORTH},${BBOX_EAST});
+                  way["footway"="crossing"](${BBOX_SOUTH},${BBOX_WEST},${BBOX_NORTH},${BBOX_EAST});
+                );
+                out center;
+            """.trimIndent()
+            val url = URL("https://overpass-api.de/api/interpreter")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 20_000
+                readTimeout = 30_000
+                setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            }
+            conn.outputStream.use {
+                it.write("data=${java.net.URLEncoder.encode(query, "UTF-8")}".toByteArray())
+            }
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            conn.disconnect()
+            body
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun parseCrossings(json: String): List<OsmCrossing> {
+        return try {
+            val root = JSONObject(json)
+            val elements = root.getJSONArray("elements")
+            buildList {
+                for (i in 0 until elements.length()) {
+                    val el = elements.getJSONObject(i)
+                    when (el.optString("type")) {
+                        "node" -> {
+                            if (el.has("lat") && el.has("lon")) {
+                                add(OsmCrossing(el.getDouble("lat"), el.getDouble("lon")))
+                            }
+                        }
+                        "way" -> {
+                            val center = el.optJSONObject("center")
+                            if (center != null) {
+                                add(OsmCrossing(center.getDouble("lat"), center.getDouble("lon")))
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     private fun haversineM(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val r = 6_371_000.0
         val dLat = Math.toRadians(lat2 - lat1)
@@ -151,7 +256,18 @@ class OjenMapBundle @Inject constructor(
     }
 }
 
+data class CrossingHint(
+    val lat: Double,
+    val lng: Double,
+    val distanceM: Double,
+)
+
 private data class OsmWay(
     val points: List<Pair<Double, Double>>,
     val tags: Map<String, String>,
+)
+
+private data class OsmCrossing(
+    val lat: Double,
+    val lng: Double,
 )

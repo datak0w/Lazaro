@@ -30,6 +30,30 @@ class MapsVisionFusionCoordinator @Inject constructor(
     }
 
     fun onMapsInstruction(type: MapsInstructionType, rawText: String) {
+        applyInstruction(type, rawText, openWindowIfNeeded = false)
+    }
+
+    /** Misma fusión de fases, disparada por la guía OSRM propia. */
+    fun onOwnInstruction(
+        type: MapsInstructionType,
+        side: TurnSide? = null,
+        rawText: String = "",
+    ) {
+        when (type) {
+            MapsInstructionType.TURN, MapsInstructionType.ROUNDABOUT ->
+                navigationAudioCoordinator.openOwnTurnWindow(side, type)
+            MapsInstructionType.CROSS_STREET ->
+                navigationAudioCoordinator.openOwnCrossSearch()
+            else -> Unit
+        }
+        applyInstruction(type, rawText, openWindowIfNeeded = true)
+    }
+
+    private fun applyInstruction(
+        type: MapsInstructionType,
+        rawText: String,
+        openWindowIfNeeded: Boolean,
+    ) {
         val now = System.currentTimeMillis()
         when (type) {
             MapsInstructionType.CROSS_STREET -> {
@@ -39,7 +63,7 @@ class MapsVisionFusionCoordinator @Inject constructor(
             MapsInstructionType.TURN,
             MapsInstructionType.ROUNDABOUT,
             -> {
-                if (navigationAudioCoordinator.isWithinTurnWindow(now)) {
+                if (openWindowIfNeeded || navigationAudioCoordinator.isWithinTurnWindow(now)) {
                     phase = OutdoorNavPhase.TURN_AT_JUNCTION
                 }
             }

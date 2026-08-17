@@ -9,6 +9,14 @@ object WeWalkProtocol {
     const val CMD_INIT = 0x01
     const val CMD_VERSION = 0x02
     const val CMD_SESSION = 0x03
+    /** Candidatos WeHack (telemetría / obstáculo); confirmar con captura real. */
+    const val CMD_PROBE_C1 = 0xC1
+    const val CMD_PROBE_CA = 0xCA
+
+    fun isKnownSessionCmd(cmd: Int): Boolean = when (cmd) {
+        CMD_BATTERY, CMD_INIT, CMD_VERSION, CMD_SESSION -> true
+        else -> false
+    }
 
     fun buildFrame(cmd: Int, payload: ByteArray = byteArrayOf()): ByteArray {
         return byteArrayOf(0xAA.toByte(), 0x01.toByte(), cmd.toByte()) +
@@ -37,6 +45,8 @@ object WeWalkProtocol {
             CMD_INIT -> "Init OK"
             CMD_VERSION -> "Versión ${payload.toHex()}"
             CMD_SESSION -> "Sesión ${payload.toHex()}"
+            CMD_PROBE_C1 -> "Probe C1 ${payload.toHex()}"
+            CMD_PROBE_CA -> "Probe CA ${payload.toHex()}"
             else -> "CMD 0x${cmd.toString(16).uppercase()} ${payload.toHex()}"
         }
     }

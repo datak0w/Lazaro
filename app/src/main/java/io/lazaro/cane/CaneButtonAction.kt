@@ -10,12 +10,15 @@ enum class CaneButtonAction {
     /** Abajo — callar y cancelar. */
     CANCEL,
 
-    /** Arriba — ¿dónde estoy? */
+    /**
+     * Arriba — foto y descripción («dime qué ves»).
+     * (Antes era «dónde estoy»; ese va a doble vol+.)
+     */
     WHERE_AM_I,
 
-    /** Volumen −. */
+    /** Volumen −. Un toque: bajar. Doble: modo dormir. */
     VOLUME_DOWN,
 
-    /** Volumen +. */
+    /** Volumen +. Un toque: subir. Doble: ¿dónde estoy? */
     VOLUME_UP,
 }

@@ -49,15 +49,24 @@ class MemoryContextBuilder @Inject constructor(
                 appendLine("Hay una confirmación pendiente: ${actionExecutor.getPendingHint()}.")
             }
             if (unreadMessages > 0) {
-                appendLine("Mensajes sin leer: $unreadMessages. Ofrece leerlos si es oportuno.")
+                appendLine("Mensajes sin leer: $unreadMessages.")
             }
             appendLine("Ubicación aproximada: $locationLine")
             appendLine(activeSessionTracker.formatForPrompt())
+            if (activeSessionTracker.snapshot()?.kind == io.lazaro.assistant.ActiveSessionKind.NAVIGATION ||
+                activeSessionTracker.snapshot()?.kind == io.lazaro.assistant.ActiveSessionKind.ROUTE_REPLAY
+            ) {
+                appendLine(
+                    "Si el usuario está perdido, desorientado o pregunta rumbo/distancia, " +
+                        "responde con destino, metros que faltan y dirección a seguir. " +
+                        "Usa sitios favoritos cercanos como referencias espaciales.",
+                )
+            }
             appendLine("=== FIN ESTADO ===")
 
             appendLine("=== MEMORIA DEL CLIENTE (usar en respuestas y acciones) ===")
             if (places.isNotEmpty()) {
-                appendLine("Sitios favoritos:")
+                appendLine("Sitios favoritos (también sirven de referencia, no solo destino):")
                 places.take(12).forEach { place ->
                     val addr = place.address?.takeIf { it.isNotBlank() }?.let { " — $it" }.orEmpty()
                     appendLine("- ${place.displayName}$addr")
@@ -96,8 +105,8 @@ class MemoryContextBuilder @Inject constructor(
             )
             if (activeSessionTracker.isPausedForChat()) {
                 appendLine(
-                    "IMPORTANTE: hay una sesión pausada. Tras resolver la petición actual, " +
-                        "pregunta si quiere reanudarla (o usa resume_active_session).",
+                    "Hay una sesión pausada. Si el usuario pregunta qué hacer, " +
+                        "usa resume_active_session o cancela; no insistas en cada turno.",
                 )
             }
         }

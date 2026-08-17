@@ -38,8 +38,73 @@ class ContactResolver @Inject constructor(
         return phone.filter { it.isDigit() || it == '+' }
     }
 
+    /**
+     * Dígitos internacionales para wa.me / api.whatsapp.com (sin +).
+     * España: 9 dígitos que empiezan por 6/7 → antepone 34.
+     */
+    fun toWhatsAppPhoneDigits(phone: String): String {
+        var digits = phone.filter { it.isDigit() }
+        if (digits.isEmpty()) return ""
+        // Quitar 00 internacional
+        if (digits.startsWith("00") && digits.length > 4) {
+            digits = digits.removePrefix("00")
+        }
+        // Móvil ES sin prefijo
+        if (digits.length == 9 && (digits.startsWith("6") || digits.startsWith("7"))) {
+            digits = "34$digits"
+        }
+        return digits
+    }
+
     fun formatPhoneForSpeech(phone: String): String {
         return normalizePhone(phone).map { it.toString() }.joinToString(" ")
+    }
+
+    /** Busca el nombre del contacto por número (últimos dígitos). */
+    fun lookupByPhone(phoneNumber: String): ContactMatch? {
+        val target = digitsOnly(phoneNumber)
+        if (target.length < 6) return null
+
+        try {
+            val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+            val projection = arrayOf(
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER,
+            )
+            val cursor = context.contentResolver.query(uri, projection, null, null, null)
+                ?: return null
+            cursor.use {
+                val nameIdx = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val phoneIdx = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                var best: ContactMatch? = null
+                var bestScore = -1
+                while (it.moveToNext()) {
+                    val name = it.getString(nameIdx).orEmpty()
+                    val phone = digitsOnly(it.getString(phoneIdx).orEmpty())
+                    if (phone.length < 6 || name.isBlank()) continue
+                    val score = phoneMatchScore(target, phone)
+                    if (score > bestScore) {
+                        bestScore = score
+                        best = ContactMatch(name, phone, "contactos")
+                    }
+                }
+                if (bestScore >= 6) return best
+            }
+        } catch (_: SecurityException) {
+            // READ_CONTACTS not granted
+        }
+        return null
+    }
+
+    private fun digitsOnly(phone: String): String = phone.filter { it.isDigit() }
+
+    private fun phoneMatchScore(a: String, b: String): Int {
+        if (a == b) return 100
+        val suffixLen = minOf(a.length, b.length, 9)
+        if (suffixLen < 6) return -1
+        val aSuffix = a.takeLast(suffixLen)
+        val bSuffix = b.takeLast(suffixLen)
+        return if (aSuffix == bSuffix) suffixLen else -1
     }
 
     private suspend fun addMemoryMatches(

@@ -9,14 +9,23 @@ import io.lazaro.media.MediaLauncherAction
 import io.lazaro.memory.entity.CustomSkill
 import io.lazaro.memory.SkillExecutor
 import io.lazaro.messaging.WhatsAppReplyAction
+import io.lazaro.messaging.WhatsAppSendIntentDetector
+import io.lazaro.messaging.WhatsAppVoiceNoteAction
+import io.lazaro.messaging.MessagesIntentDetector
+import io.lazaro.phone.IncomingCallMonitor
+import io.lazaro.navigation.NavigationContextAction
 import io.lazaro.navigation.NavigationSessionManager
 import io.lazaro.navigation.NavigationTarget
+import io.lazaro.navigation.StreetSideAction
 import io.lazaro.news.NewsReaderAction
 import io.lazaro.receipt.ReceiptCheckerAction
 import io.lazaro.tools.BatteryAction
 import io.lazaro.tools.CalculatorAction
 import io.lazaro.tools.TimeAction
 import io.lazaro.tools.WeatherAction
+import io.lazaro.alarm.AlarmAction
+import io.lazaro.alarm.ParsedClockTime
+import io.lazaro.vision.SceneLookAction
 import io.lazaro.pathguide.PathGuideController
 import io.lazaro.pathguide.PathGuideMode
 import io.lazaro.pathguide.WalkModeAction
@@ -37,6 +46,8 @@ class ActionExecutor @Inject constructor(
     private val messagesAction: MessagesAction,
     private val callAction: CallAction,
     private val whatsAppReplyAction: WhatsAppReplyAction,
+    private val whatsAppVoiceNoteAction: WhatsAppVoiceNoteAction,
+    private val incomingCallMonitor: IncomingCallMonitor,
     private val memoryActionHandler: MemoryActionHandler,
     private val skillExecutor: SkillExecutor,
     private val mediaLauncherAction: MediaLauncherAction,
@@ -47,6 +58,8 @@ class ActionExecutor @Inject constructor(
     private val timeAction: TimeAction,
     private val batteryAction: BatteryAction,
     private val calculatorAction: CalculatorAction,
+    private val alarmAction: AlarmAction,
+    private val sceneLookAction: SceneLookAction,
     private val receiptCheckerAction: ReceiptCheckerAction,
     private val mapsLaunchDeferrer: MapsLaunchDeferrer,
     private val navigationIntentDetector: NavigationIntentDetector,
@@ -59,6 +72,8 @@ class ActionExecutor @Inject constructor(
     private val routeRepository: RouteRepository,
     private val activeSessionTracker: ActiveSessionTracker,
     private val navigationSessionManager: NavigationSessionManager,
+    private val navigationContextAction: NavigationContextAction,
+    private val streetSideAction: StreetSideAction,
 ) {
     private var pendingConfirmation: PendingAction? = null
     private var pendingSkill: CustomSkill? = null
@@ -90,6 +105,8 @@ class ActionExecutor @Inject constructor(
             "select_book" -> "elegir un libro"
             "select_media_app" -> "elegir una app"
             "select_media_search_app" -> "elegir dónde buscar"
+            "select_recent_media" -> "elegir música reciente"
+            "await_music_query" -> "decir qué música poner"
             "select_transit_stop" -> "elegir una parada"
             "select_contact_call" -> "elegir un contacto"
             ToolName.NavigateTo.id -> "confirmar el destino"
@@ -97,9 +114,13 @@ class ActionExecutor @Inject constructor(
             "plan_transit_route" -> "confirmar la ruta en transporte público"
             "read_book" -> "confirmar el libro"
             "reply_message" -> "confirmar el mensaje de WhatsApp"
+            WhatsAppVoiceNoteAction.TOOL_OFFER_VOICE_REPLY -> "responder con mensaje de voz"
+            WhatsAppVoiceNoteAction.TOOL_SELECT_VOICE_RECIPIENT -> "elegir contacto de WhatsApp"
+            "dictate_whatsapp_text" -> "dictar el mensaje de WhatsApp"
             "launch_media" -> "confirmar abrir la app"
             "search_media" -> "confirmar la búsqueda"
             ToolName.MakeCall.id -> "confirmar la llamada"
+            CallAction.TOOL_ANSWER_INCOMING -> "responder o rechazar la llamada"
             "execute_skill" -> "confirmar el skill"
             "confirm_memory", "confirm_skill" -> "confirmar guardar en memoria"
             ToolName.ResumeActiveSession.id -> "reanudar la sesión activa"
@@ -180,6 +201,19 @@ class ActionExecutor @Inject constructor(
         return timeAction.tryPrepare(userText)
     }
 
+    suspend fun tryHandleAlarmIntent(userText: String): ActionResult? {
+        return alarmAction.tryPrepare(userText)
+    }
+
+    suspend fun tryHandleSceneLookIntent(userText: String): ActionResult? {
+        return sceneLookAction.tryPrepare(userText)
+    }
+
+    suspend fun tryHandleWhereAmIIntent(userText: String): ActionResult? {
+        if (!WhereAmIIntentDetector.detect(userText)) return null
+        return locationAction.whereAmI()
+    }
+
     fun tryHandleBatteryIntent(userText: String): ActionResult? {
         return batteryAction.tryPrepare(userText)
     }
@@ -211,7 +245,18 @@ class ActionExecutor @Inject constructor(
         }
     }
 
+    /** Perdido / rumbo / cuánto falta durante navegación. */
+    suspend fun tryHandleNavigationContextIntent(userText: String): ActionResult? {
+        return navigationContextAction.handle(userText)
+    }
+
     suspend fun tryHandleRouteIntent(userText: String): ActionResult? {
+        streetSideAction.tryPrepare(userText)?.let { result ->
+            if (result is ActionResult.NeedsConfirmation) {
+                storePending(result.pendingAction, result.prompt)
+            }
+            return result
+        }
         val result = routeAction.tryPrepare(userText) ?: return null
         if (result is ActionResult.NeedsConfirmation) {
             storePending(result.pendingAction, result.prompt)
@@ -265,6 +310,8 @@ class ActionExecutor @Inject constructor(
         val prep = mediaLauncherAction.confirmSearchAppSelection(pending.args, userText)
         if (prep is ActionResult.NeedsConfirmation) {
             storePending(prep.pendingAction, prep.prompt)
+        } else {
+            pendingConfirmation = null
         }
         return prep
     }
@@ -276,6 +323,34 @@ class ActionExecutor @Inject constructor(
         val prep = mediaLauncherAction.confirmSelection(pending.args, userText)
         if (prep is ActionResult.NeedsConfirmation) {
             storePending(prep.pendingAction, prep.prompt)
+        } else {
+            pendingConfirmation = null
+        }
+        return prep
+    }
+
+    suspend fun tryHandleRecentMediaSelection(userText: String): ActionResult? {
+        val pending = pendingConfirmation ?: return null
+        if (pending.toolName != "select_recent_media") return null
+
+        val prep = mediaLauncherAction.confirmRecentMediaSelection(pending.args, userText)
+        if (prep is ActionResult.NeedsConfirmation) {
+            storePending(prep.pendingAction, prep.prompt)
+        } else {
+            pendingConfirmation = null
+        }
+        return prep
+    }
+
+    suspend fun tryHandleAwaitMusicQuery(userText: String): ActionResult? {
+        val pending = pendingConfirmation ?: return null
+        if (pending.toolName != "await_music_query") return null
+
+        val prep = mediaLauncherAction.confirmAwaitMusicQuery(pending.args, userText)
+        if (prep is ActionResult.NeedsConfirmation) {
+            storePending(prep.pendingAction, prep.prompt)
+        } else {
+            pendingConfirmation = null
         }
         return prep
     }
@@ -287,6 +362,127 @@ class ActionExecutor @Inject constructor(
         }
         return result
     }
+
+    suspend fun tryHandleCallIntent(userText: String): ActionResult? {
+        val contact = CallIntentDetector.detectContactQuery(userText) ?: return null
+        val prep = callAction.prepareCall(contact)
+        if (prep is ActionResult.NeedsConfirmation) {
+            storePending(prep.pendingAction, prep.prompt)
+        }
+        return prep
+    }
+
+    suspend fun tryHandleMessagesIntent(userText: String): ActionResult? {
+        if (!MessagesIntentDetector.isReadMessagesRequest(userText)) return null
+        val result = messagesAction.readMessages()
+        if (result is ActionResult.NeedsConfirmation) {
+            storePending(result.pendingAction, result.prompt)
+        }
+        return result
+    }
+
+    suspend fun tryHandleWhatsAppSendIntent(userText: String): ActionResult? {
+        val detected = WhatsAppSendIntentDetector.detectRecipient(userText) ?: return null
+        val result = if (detected.needsRecipient || detected.recipient.isNullOrBlank()) {
+            whatsAppVoiceNoteAction.prepareSendToContact("")
+        } else {
+            whatsAppVoiceNoteAction.prepareSendToContact(detected.recipient)
+        }
+        if (result is ActionResult.NeedsConfirmation) {
+            storePending(result.pendingAction, result.prompt)
+        }
+        return result
+    }
+
+    fun tryHandleHangupIntent(userText: String): ActionResult? {
+        if (!incomingCallMonitor.isInActiveCall()) return null
+        if (!WhatsAppSendIntentDetector.isHangupDuringCall(userText)) return null
+        return callAction.hangUpActiveCall()
+    }
+
+    /** Pendiente de dictado texto WhatsApp (sin número para nota de voz). */
+    fun tryHandleWhatsAppTextDictate(userText: String): ActionResult? {
+        val pending = pendingConfirmation ?: return null
+        if (pending.toolName != "dictate_whatsapp_text") return null
+        val message = userText.trim()
+        if (message.isBlank()) return ActionResult.Error("No he oído el mensaje. Repítelo.")
+        pendingConfirmation = null
+        lastPromptText = ""
+        val args = pending.args + ("message" to message)
+        return whatsAppReplyAction.executeReply(args)
+    }
+
+    suspend fun tryHandleWhatsAppVoiceRecipientSelection(userText: String): ActionResult? {
+        val pending = pendingConfirmation ?: return null
+        if (pending.toolName != WhatsAppVoiceNoteAction.TOOL_SELECT_VOICE_RECIPIENT) {
+            return null
+        }
+        val candidates = pending.args.filterKeys { it.startsWith("candidate_") }
+            .toList()
+            .sortedBy { it.first }
+            .mapNotNull { (_, encoded) ->
+                val parts = encoded.split("|", limit = 2)
+                if (parts.size == 2) parts[0] to parts[1] else null
+            }
+
+        if (candidates.isNotEmpty()) {
+            val index = io.lazaro.voice.VoiceOptionParser.parseIndex(userText, candidates.size)
+            val chosen = when {
+                index != null && index in candidates.indices -> candidates[index]
+                else -> candidates.find { (name, _) ->
+                    name.equals(userText.trim(), ignoreCase = true) ||
+                        name.contains(userText.trim(), ignoreCase = true)
+                }
+            }
+            if (chosen == null) {
+                return ActionResult.Error(
+                    "No he entendido. Di el número o el nombre del contacto.",
+                )
+            }
+            pendingConfirmation = null
+            lastPromptText = ""
+            return whatsAppVoiceNoteAction.armRecordingPrompt(chosen.first, chosen.second)
+        }
+
+        pendingConfirmation = null
+        lastPromptText = ""
+        val result = whatsAppVoiceNoteAction.prepareSendToContact(userText)
+        if (result is ActionResult.NeedsConfirmation) {
+            storePending(result.pendingAction, result.prompt)
+        }
+        return result
+    }
+
+    fun prepareIncomingCallPrompt(displayName: String, phoneNumber: String): ActionResult {
+        val prep = callAction.prepareIncomingAnswer(displayName, phoneNumber)
+        if (prep is ActionResult.NeedsConfirmation) {
+            storePending(prep.pendingAction, prep.prompt)
+        }
+        return prep
+    }
+
+    fun clearIncomingCallPending() {
+        if (pendingConfirmation?.toolName == CallAction.TOOL_ANSWER_INCOMING) {
+            pendingConfirmation = null
+            lastPromptText = ""
+        }
+    }
+
+    fun isVoiceNoteRecording(): Boolean = whatsAppVoiceNoteAction.isRecording()
+
+    fun finishVoiceNoteRecording(): ActionResult = whatsAppVoiceNoteAction.finishAndSend()
+
+    fun cancelVoiceNoteRecording(): ActionResult = whatsAppVoiceNoteAction.cancelRecording()
+
+    fun consumeArmedVoiceNoteStart(): Map<String, String>? =
+        whatsAppVoiceNoteAction.consumeArmedStart()
+
+    fun beginArmedVoiceNoteCapture(
+        scope: kotlinx.coroutines.CoroutineScope,
+        args: Map<String, String>,
+    ): Boolean = whatsAppVoiceNoteAction.beginMicCapture(scope, args)
+
+    fun isVoiceNoteTimedOut(): Boolean = whatsAppVoiceNoteAction.isTimedOut()
 
     suspend fun tryHandleContactSelection(userText: String): ActionResult? {
         val pending = pendingConfirmation ?: return null
@@ -338,7 +534,13 @@ class ActionExecutor @Inject constructor(
             }
             ToolName.WhereAmI -> locationAction.whereAmI()
             ToolName.WebSearch -> ActionResult.Success("Buscaré eso en internet. Un momento.")
-            ToolName.ReadMessages -> messagesAction.readMessages()
+            ToolName.ReadMessages -> {
+                val result = messagesAction.readMessages()
+                if (result is ActionResult.NeedsConfirmation) {
+                    storePending(result.pendingAction, result.prompt)
+                }
+                result
+            }
             ToolName.MakeCall -> {
                 val prep = callAction.prepareCall(args["contact_name"].orEmpty())
                 if (prep is ActionResult.NeedsConfirmation) {
@@ -424,6 +626,41 @@ class ActionExecutor @Inject constructor(
             ToolName.ListSavedRoutes -> listSavedRoutes()
             ToolName.ListSavedPlaces -> listSavedPlaces()
             ToolName.ResumeActiveSession -> resumeActiveSession()
+            ToolName.ManageAlarm -> executeManageAlarm(args)
+            ToolName.DescribeScene -> sceneLookAction.describeWhatIsAhead()
+        }
+    }
+
+    private suspend fun executeManageAlarm(args: Map<String, String>): ActionResult {
+        val action = args["action"].orEmpty().lowercase().trim()
+        val hour = args["hour"]?.toIntOrNull()
+        val minute = args["minute"]?.toIntOrNull() ?: 0
+        val fromHour = args["from_hour"]?.toIntOrNull()
+        val fromMinute = args["from_minute"]?.toIntOrNull()
+        val label = args["label"].orEmpty().ifBlank { "Alarma" }
+        return when (action) {
+            "set", "poner", "crea", "crear" -> {
+                if (hour == null) ActionResult.Error("¿A qué hora pongo la alarma?")
+                else alarmAction.setAlarm(hour, minute, label)
+            }
+            "change", "cambiar", "modificar" -> {
+                if (hour == null) ActionResult.Error("¿A qué hora la cambio?")
+                else {
+                    val from = if (fromHour != null) {
+                        ParsedClockTime(fromHour, fromMinute ?: 0)
+                    } else {
+                        null
+                    }
+                    alarmAction.changeAlarm(from, ParsedClockTime(hour, minute))
+                }
+            }
+            "cancel", "cancela", "quitar", "borrar" -> {
+                val time = if (hour != null) ParsedClockTime(hour, minute) else null
+                alarmAction.cancelAlarm(time)
+            }
+            "stop", "apagar", "parar" -> alarmAction.stopRinging()
+            "list", "lista", "listar" -> alarmAction.listAlarms()
+            else -> ActionResult.Error("No entiendo esa acción de alarma.")
         }
     }
 
@@ -552,6 +789,7 @@ class ActionExecutor @Inject constructor(
             }
             "save_saved_place" -> savedPlaceAction.confirmSave(pending.args)
             "delete_saved_place" -> savedPlaceAction.confirmDelete(pending.args)
+            "save_street_side" -> streetSideAction.confirmSave(pending.args)
             "follow_saved_route" -> routeAction.confirmFollowSavedRoute(pending.args)
             "delete_saved_route" -> routeAction.confirmDeleteRoute(pending.args)
             ToolName.MakeCall.id -> {
@@ -562,9 +800,28 @@ class ActionExecutor @Inject constructor(
                 )
                 callAction.executeCall(contact)
             }
+            CallAction.TOOL_ANSWER_INCOMING -> callAction.answerIncomingCall()
             "reply_message" -> whatsAppReplyAction.executeReply(pending.args)
+            WhatsAppVoiceNoteAction.TOOL_OFFER_VOICE_REPLY -> {
+                val phone = pending.args["phone_number"].orEmpty()
+                val recipient = pending.args["recipient"].orEmpty()
+                if (phone.filter { it.isDigit() }.length < 8) {
+                    // Sin número: dictado de texto vía notificación / intent
+                    val prompt = "Dime el mensaje para $recipient."
+                    val action = PendingAction(
+                        "dictate_whatsapp_text",
+                        pending.args,
+                    )
+                    storePending(action, prompt)
+                    ActionResult.NeedsConfirmation(prompt = prompt, pendingAction = action)
+                } else {
+                    whatsAppVoiceNoteAction.armRecordingPrompt(recipient, phone)
+                }
+            }
             "launch_media" -> mediaLauncherAction.confirmLaunch(pending.args)
             "search_media" -> mediaLauncherAction.confirmSearch(pending.args)
+            "select_recent_media" -> mediaLauncherAction.confirmRecentMediaSelection(pending.args, "sí")
+            "await_music_query" -> ActionResult.Error("Dime un artista, estilo o playlist.")
             "read_book" -> bookReaderAction.confirmRead(pending.args)
             "navigate_transit_stop" -> {
                 val stopName = pending.args["name"].orEmpty()
@@ -614,12 +871,20 @@ class ActionExecutor @Inject constructor(
     suspend fun cancelPending(): ActionResult {
         val pending = pendingConfirmation
         val wasResume = pending?.toolName == ToolName.ResumeActiveSession.id
+        val wasIncoming = pending?.toolName == CallAction.TOOL_ANSWER_INCOMING
         pendingConfirmation = null
         pendingSkill = null
         pendingNavigationTarget = null
         mapsLaunchDeferrer.clear()
         lastPromptText = ""
+        whatsAppVoiceNoteAction.cancelArmed()
+        if (whatsAppVoiceNoteAction.isRecording()) {
+            whatsAppVoiceNoteAction.cancelRecording()
+        }
         memoryActionHandler.rejectMemoryProposal()
+        if (wasIncoming) {
+            return callAction.rejectIncomingCall()
+        }
         if (wasResume) {
             val kind = activeSessionTracker.snapshot()?.kind
             when (kind) {
@@ -684,15 +949,20 @@ class ActionExecutor @Inject constructor(
         private val AFFIRMATIVE = setOf(
             "si", "confirmo", "confirmar", "vale", "ok", "de acuerdo", "yes",
             "claro", "adelante", "por supuesto", "correcto", "afirmativo",
+            "responde", "responder", "contesta", "contestar", "acepta", "aceptar",
+            "coge", "coger", "cogelo", "cogela", "cogelos",
+            "descuélgame", "descuelga", "atiende", "atiendela",
         )
         private val AFFIRMATIVE_PREFIXES = listOf(
             "si", "vale", "ok", "claro", "de acuerdo", "por supuesto",
+            "responde", "contesta", "acepta", "coge", "cogelo", "atiende",
         )
         private val NEGATIVE_EXACT = setOf(
             "no", "nope", "negativo", "cancelar", "cancela", "nel", "paso",
+            "rechaza", "rechazar", "cuelga", "colgar", "ignora", "ignorar",
         )
         private val NEGATIVE_PREFIXES = listOf(
-            "no", "cancela", "cancelar",
+            "no", "cancela", "cancelar", "rechaza", "cuelga", "ignora",
         )
         private val UNCERTAIN_DENY = listOf(
             "no se", "no lo se", "no entend", "no estoy seguro",

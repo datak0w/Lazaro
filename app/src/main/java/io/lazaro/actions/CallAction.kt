@@ -1,9 +1,13 @@
 package io.lazaro.actions
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.telecom.TelecomManager
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.lazaro.contacts.ContactMatch
@@ -25,7 +29,7 @@ class CallAction @Inject constructor(
         val matches = contactResolver.findContacts(contactQuery)
         if (matches.isEmpty()) {
             val digits = contactResolver.normalizePhone(contactQuery)
-            if (digits.length >= 9) {
+            if (digits.filter { it.isDigit() }.length >= 9) {
                 return buildCallConfirmation(
                     ContactMatch(displayName = contactQuery, phoneNumber = digits, source = "número"),
                 )
@@ -70,31 +74,128 @@ class CallAction @Inject constructor(
             }
     }
 
+    /**
+     * Tras confirmar: marca sola, sin dejar al usuario ciego en el marcador.
+     */
     fun executeCall(contact: ContactMatch): ActionResult {
         val phone = contactResolver.normalizePhone(contact.phoneNumber)
-        val hasCallPermission = ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.CALL_PHONE,
-        ) == PackageManager.PERMISSION_GRANTED
-
-        val intent = if (hasCallPermission) {
-            Intent(Intent.ACTION_CALL, Uri.parse("tel:$phone")).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        } else {
-            Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone")).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+        if (phone.filter { it.isDigit() }.length < 3) {
+            return ActionResult.Error("No tengo un número válido para llamar a ${contact.displayName}.")
+        }
+        if (!hasCallPermission()) {
+            return ActionResult.Error(
+                "Necesito permiso de llamadas para marcar solo. " +
+                    "En ajustes de Lazaro, activa Teléfono o Llamadas, y vuelve a pedírmelo.",
+            )
         }
 
-        context.startActivity(intent)
-        val spokenPhone = contactResolver.formatPhoneForSpeech(phone)
-        return if (hasCallPermission) {
+        return try {
+            placeOutgoingCall(phone)
             ActionResult.Success("Llamando a ${contact.displayName}.")
-        } else {
-            ActionResult.Success(
-                "Abro el marcador con ${contact.displayName}, número $spokenPhone. Confirma la llamada en el teléfono.",
+        } catch (e: SecurityException) {
+            ActionResult.Error(
+                "Sin permiso para llamar. Activa el permiso de teléfono para Lazaro en ajustes.",
             )
+        } catch (e: Exception) {
+            ActionResult.Error("No pude iniciar la llamada: ${e.message}")
+        }
+    }
+
+    fun placeOutgoingCall(phone: String) {
+        val uri = Uri.fromParts("tel", phone, null)
+        val telecom = context.getSystemService(TelecomManager::class.java)
+        if (telecom != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                telecom.placeCall(uri, Bundle())
+                return
+            } catch (_: Exception) {
+                // Fallback ACTION_CALL
+            }
+        }
+        context.startActivity(
+            Intent(Intent.ACTION_CALL, uri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            },
+        )
+    }
+
+    fun prepareIncomingAnswer(displayName: String, phoneNumber: String): ActionResult {
+        val label = displayName.ifBlank { "número desconocido" }
+        return ActionResult.NeedsConfirmation(
+            prompt = "LLAMADA. $label. Di responde, sí o cógelo.",
+            pendingAction = PendingAction(
+                toolName = TOOL_ANSWER_INCOMING,
+                args = mapOf(
+                    "contact_name" to label,
+                    "phone_number" to phoneNumber,
+                ),
+            ),
+        )
+    }
+
+    fun answerIncomingCall(): ActionResult {
+        if (!hasAnswerPermission()) {
+            return ActionResult.Error(
+                "Necesito permiso para responder llamadas. Actívalo en ajustes de la app.",
+            )
+        }
+        return try {
+            val telecom = context.getSystemService(TelecomManager::class.java)
+                ?: return ActionResult.Error("No puedo acceder al teléfono.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                telecom.acceptRingingCall()
+            } else {
+                return ActionResult.Error("Este Android no permite responder desde Lázaro.")
+            }
+            ActionResult.Success(
+                "Respondiendo. Durante la llamada di Lázaro cuelga para colgar.",
+            )
+        } catch (e: SecurityException) {
+            ActionResult.Error("Sin permiso para responder. Activa «Responder llamadas» para Lázaro.")
+        } catch (e: Exception) {
+            ActionResult.Error("No pude responder: ${e.message}")
+        }
+    }
+
+    fun rejectIncomingCall(): ActionResult {
+        if (!hasAnswerPermission()) {
+            return ActionResult.Success("Vale, no respondo. Recházala en el teléfono si quieres.")
+        }
+        return try {
+            val telecom = context.getSystemService(TelecomManager::class.java)
+                ?: return ActionResult.Success("Vale, no respondo.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                telecom.endCall()
+            }
+            ActionResult.Success("Rechazada.")
+        } catch (_: SecurityException) {
+            ActionResult.Success("Vale, no respondo.")
+        } catch (_: Exception) {
+            ActionResult.Success("Vale, no respondo.")
+        }
+    }
+
+    /** Cuelga la llamada activa (o rechaza si aún suena). */
+    fun hangUpActiveCall(): ActionResult {
+        if (!hasAnswerPermission()) {
+            return ActionResult.Error(
+                "Necesito permiso para colgar. Activa «Responder llamadas» para Lázaro en ajustes.",
+            )
+        }
+        return try {
+            val telecom = context.getSystemService(TelecomManager::class.java)
+                ?: return ActionResult.Error("No puedo acceder al teléfono.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val ended = telecom.endCall()
+                if (ended) ActionResult.Success("Llamada colgada.")
+                else ActionResult.Success("He pedido colgar la llamada.")
+            } else {
+                ActionResult.Error("Este Android no permite colgar desde Lázaro.")
+            }
+        } catch (e: SecurityException) {
+            ActionResult.Error("Sin permiso para colgar. Activa el permiso de teléfono para Lázaro.")
+        } catch (e: Exception) {
+            ActionResult.Error("No pude colgar: ${e.message}")
         }
     }
 
@@ -112,5 +213,23 @@ class CallAction @Inject constructor(
                 ),
             ),
         )
+    }
+
+    private fun hasCallPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CALL_PHONE,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasAnswerPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ANSWER_PHONE_CALLS,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    companion object {
+        const val TOOL_ANSWER_INCOMING = "answer_incoming_call"
     }
 }

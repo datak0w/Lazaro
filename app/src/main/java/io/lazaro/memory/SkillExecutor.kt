@@ -32,8 +32,7 @@ class SkillExecutor @Inject constructor(
                     navigationAction.launchWalkingNavigation(destination)
                 }
                 ActionResult.Success(
-                    "Te guío a pie hasta $destination. Abro Google Maps con voz. " +
-                        "Me callo para que oigas a Maps.",
+                    "Te guío a pie hasta $destination.",
                     suspendListening = true,
                 )
             }
@@ -57,12 +56,41 @@ class SkillExecutor @Inject constructor(
     }
 
     private suspend fun callPhone(payload: String): ActionResult {
-        val number = memoryRepository.resolveMemoryValue(payload) ?: parsePayload(payload, "phone") ?: payload
-        val intent = Intent(Intent.ACTION_DIAL, "tel:$number".toUri()).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val number = memoryRepository.resolveMemoryValue(payload)
+            ?: parsePayload(payload, "phone")
+            ?: payload
+        val phone = number.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+        if (phone.filter { it.isDigit() }.length < 3) {
+            return ActionResult.Error("No tengo un número válido para llamar.")
         }
-        context.startActivity(intent)
-        return ActionResult.Success("Abriendo llamada a $number.")
+        val hasCallPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.CALL_PHONE,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!hasCallPermission) {
+            return ActionResult.Error(
+                "Necesito permiso de llamadas para marcar solo. Actívalo en ajustes de Lazaro.",
+            )
+        }
+        return try {
+            val uri = android.net.Uri.fromParts("tel", phone, null)
+            val telecom = context.getSystemService(android.telecom.TelecomManager::class.java)
+            if (telecom != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                try {
+                    telecom.placeCall(uri, android.os.Bundle())
+                    return ActionResult.Success("Llamando.")
+                } catch (_: Exception) {
+                }
+            }
+            context.startActivity(
+                Intent(Intent.ACTION_CALL, uri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+            )
+            ActionResult.Success("Llamando.")
+        } catch (e: Exception) {
+            ActionResult.Error("No pude iniciar la llamada: ${e.message}")
+        }
     }
 
     private fun openUrl(payload: String): ActionResult {

@@ -2,10 +2,18 @@ package io.lazaro.media
 
 import java.util.concurrent.atomic.AtomicReference
 
+enum class MediaAutoplayPhase {
+    /** Acaba de abrir Spotify/búsqueda. */
+    OPENED,
+    /** Ya pulsó pestaña Listas o un resultado; falta Play. */
+    OPENED_ITEM,
+}
+
 data class PendingMediaAutoplay(
     val packageName: String,
     val query: String,
     val requestedAtMs: Long,
+    val phase: MediaAutoplayPhase = MediaAutoplayPhase.OPENED,
 )
 
 object MediaAutoplayCoordinator {
@@ -25,6 +33,7 @@ object MediaAutoplayCoordinator {
                 packageName = packageName,
                 query = query.trim(),
                 requestedAtMs = System.currentTimeMillis(),
+                phase = MediaAutoplayPhase.OPENED,
             ),
         )
     }
@@ -39,6 +48,14 @@ object MediaAutoplayCoordinator {
         return current
     }
 
+    fun advancePhase(packageName: String, phase: MediaAutoplayPhase) {
+        val current = peek(packageName) ?: return
+        pending.compareAndSet(
+            current,
+            current.copy(phase = phase, requestedAtMs = System.currentTimeMillis()),
+        )
+    }
+
     fun clear() {
         pending.set(null)
     }
@@ -48,6 +65,7 @@ object MediaAutoplayCoordinator {
     }
 
     private fun isExpired(request: PendingMediaAutoplay): Boolean {
-        return System.currentTimeMillis() - request.requestedAtMs > 18_000L
+        // Más margen: hay que abrir búsqueda → lista → Play
+        return System.currentTimeMillis() - request.requestedAtMs > 35_000L
     }
 }

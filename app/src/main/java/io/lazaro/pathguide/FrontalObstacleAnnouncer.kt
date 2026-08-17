@@ -14,6 +14,7 @@ class FrontalObstacleAnnouncer @Inject constructor(
     private val textToSpeechManager: TextToSpeechManager,
     private val obstacleLabeler: ObstacleLabeler,
     private val bypassAdvisor: BypassAdvisor,
+    private val sleepModeController: io.lazaro.assistant.SleepModeController,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lastStairMs = 0L
@@ -97,6 +98,10 @@ class FrontalObstacleAnnouncer @Inject constructor(
         onStart: () -> Unit,
         onEnd: () -> Unit,
     ) {
+        if (sleepModeController.isSleeping()) {
+            onEnd()
+            return
+        }
         val now = System.currentTimeMillis()
         if (message == lastMessage() && now - lastMs() < debounceMs) {
             onEnd()

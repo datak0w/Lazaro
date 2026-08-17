@@ -17,6 +17,7 @@ import io.lazaro.R
 import io.lazaro.assistant.AssistantController
 import io.lazaro.cane.CaneBleService
 import io.lazaro.cane.CaneButtonMapper
+import io.lazaro.cane.CaneObstacleAlertManager
 import io.lazaro.cane.CaneRepository
 import io.lazaro.cane.CaneTriggerBridge
 import io.lazaro.cane.ble.CaneBleManager
@@ -52,9 +53,13 @@ class AssistantForegroundService : Service() {
     @Inject lateinit var piHubBleManager: PiHubBleManager
     @Inject lateinit var piHubRepository: PiHubRepository
     @Inject lateinit var distanceAlertManager: DistanceAlertManager
+    @Inject lateinit var caneObstacleAlertManager: CaneObstacleAlertManager
     @Inject lateinit var visionAlertManager: VisionAlertManager
     @Inject lateinit var pathGuideController: PathGuideController
     @Inject lateinit var pathGuideForegroundBridge: PathGuideForegroundBridge
+    @Inject lateinit var blindStatusSpeaker: io.lazaro.assistant.BlindStatusSpeaker
+    @Inject lateinit var sleepModeController: io.lazaro.assistant.SleepModeController
+    @Inject lateinit var navigationSceneLookCoordinator: io.lazaro.navigation.NavigationSceneLookCoordinator
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var hubAlertsBound = false
@@ -63,6 +68,7 @@ class AssistantForegroundService : Service() {
         super.onCreate()
         NotificationChannels.create(this)
         assistantController.bind(serviceScope)
+        navigationSceneLookCoordinator.bind(serviceScope)
         serviceScope.launch {
             caneTriggerBridge.triggers.collect { action ->
                 assistantController.handleCaneButton(action)
@@ -76,6 +82,7 @@ class AssistantForegroundService : Service() {
             }
         }
         bindHubAlertsOnce()
+        caneObstacleAlertManager.bind(caneBleManager)
         pathGuideForegroundBridge.attach { includeCamera ->
             if (!serviceStarted) return@attach
             try {
@@ -104,11 +111,17 @@ class AssistantForegroundService : Service() {
     }
 
     private var serviceStarted = false
+    /** true solo si el usuario (o la notificación) pidió parar; no auto-reiniciar. */
+    private var intentionalStop = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                assistantController.stopAssistant()
+                intentionalStop = true
+                AssistantKeepAlive.cancelAll(this)
+                AssistantKeepAlive.markAlive(false)
+                assistantController.stopAssistant(clearWantedFlag = true)
+                caneBleManager.disableAutoReconnect()
                 serviceStarted = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -118,13 +131,17 @@ class AssistantForegroundService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_START_LISTENING -> {
+                intentionalStop = false
                 ensureServiceStarted()
                 serviceScope.launch {
                     delay(700)
                     assistantController.interruptAndListen()
                 }
             }
-            else -> ensureServiceStarted()
+            else -> {
+                intentionalStop = false
+                ensureServiceStarted()
+            }
         }
         return START_STICKY
     }
@@ -135,12 +152,22 @@ class AssistantForegroundService : Service() {
         } catch (e: Exception) {
             android.util.Log.e("Lazaro", "startForeground asistente falló: ${e.message}", e)
             assistantController.setServiceRunning(false)
+            AssistantKeepAlive.markAlive(false)
+            if (!intentionalStop) {
+                AssistantKeepAlive.scheduleRestartSoon(applicationContext, delayMs = 5_000L)
+            }
             stopSelf()
             return
         }
+        AssistantKeepAlive.markAlive(true)
+        AssistantKeepAlive.scheduleHeartbeat(this)
         if (!serviceStarted) {
             serviceStarted = true
             serviceScope.launch {
+                caneBleManager.bindStatusSpeaker(blindStatusSpeaker)
+                sleepModeController.hydrateFromPrefs()
+                // En sleep no bloqueamos reconnect BLE (hace falta doble vol− para despertar).
+                caneBleManager.setSleepBlocked(false)
                 assistantController.initializeVoice()
                 assistantController.setServiceRunning(true)
                 assistantController.startAssistant()
@@ -148,6 +175,15 @@ class AssistantForegroundService : Service() {
                 startCaneServiceIfConfigured()
                 startPiHubIfConfigured()
             }
+        }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Mantener FGS vivo al quitar de recientes (usuario ciego no puede reabrir UI).
+        android.util.Log.i("Lazaro", "onTaskRemoved: FGS sigue activo; reprogramo latido")
+        if (!intentionalStop) {
+            AssistantKeepAlive.scheduleHeartbeat(applicationContext)
+            AssistantKeepAlive.scheduleRestartSoon(applicationContext, delayMs = 3_000L)
         }
     }
 
@@ -200,6 +236,7 @@ class AssistantForegroundService : Service() {
                 val config = caneRepository.config.first()
                 val mac = config.savedMac ?: return@launch
                 // Conectar BLE desde el gestor (siempre); FGS del bastón es opcional
+                caneBleManager.enableAutoReconnect(mac, config.savedName)
                 if (!caneBleManager.state.value.isConnected) {
                     caneBleManager.connect(mac, config.savedName)
                 }
@@ -214,10 +251,19 @@ class AssistantForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        AssistantKeepAlive.markAlive(false)
         pathGuideForegroundBridge.detach()
         pathGuideController.stop()
-        assistantController.stopAssistant()
+        caneBleManager.disableAutoReconnect()
+        assistantController.stopAssistant(clearWantedFlag = intentionalStop)
         assistantController.setServiceRunning(false)
+        if (!intentionalStop) {
+            // Caída inesperada o kill del sistema → volver a arrancar
+            AssistantKeepAlive.scheduleRestartSoon(applicationContext)
+            AssistantKeepAlive.scheduleHeartbeat(applicationContext)
+        } else {
+            AssistantKeepAlive.cancelAll(this)
+        }
         serviceScope.cancel()
         super.onDestroy()
     }

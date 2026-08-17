@@ -36,6 +36,13 @@ android {
             "GEMINI_MODEL",
             "\"${localProperties.getProperty("GEMINI_MODEL", "gemini-3.5-flash")}\"",
         )
+        val mapsApiKey = localProperties.getProperty("MAPS_API_KEY", "")
+        buildConfigField(
+            "String",
+            "MAPS_API_KEY",
+            "\"$mapsApiKey\"",
+        )
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -68,6 +75,9 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            pickFirsts += "**/libc++_shared.so"
+        }
     }
 }
 
@@ -89,6 +99,7 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.generativeai)
     implementation(libs.play.services.location)
+    implementation(libs.play.services.maps)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.androidx.room.runtime)
@@ -103,7 +114,27 @@ dependencies {
     implementation(libs.google.ar.core)
     implementation(libs.mlkit.image.labeling)
     implementation(libs.mlkit.text.recognition)
+    implementation(libs.mediapipe.tasks.vision)
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }
+
+val mediapipeModelFile = file("src/main/assets/efficientdet_lite0.tflite")
+val downloadMediaPipeModel = tasks.register("downloadMediaPipeModel") {
+    outputs.file(mediapipeModelFile)
+    doLast {
+        if (mediapipeModelFile.exists() && mediapipeModelFile.length() > 1_000_000L) return@doLast
+        mediapipeModelFile.parentFile.mkdirs()
+        val url =
+            "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite"
+        ant.invokeMethod(
+            "get",
+            mapOf(
+                "src" to url,
+                "dest" to mediapipeModelFile.absolutePath,
+            ),
+        )
+    }
+}
+tasks.named("preBuild").configure { dependsOn(downloadMediaPipeModel) }

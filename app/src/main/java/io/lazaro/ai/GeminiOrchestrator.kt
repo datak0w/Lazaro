@@ -54,6 +54,13 @@ class GeminiOrchestrator @Inject constructor(
             return AssistantReply("¿Perdón? Repite, por favor.")
         }
 
+        // Alarmas (incl. «para» si está sonando) antes de confirmaciones / interrupt
+        actionExecutor.tryHandleAlarmIntent(cleaned)?.let { return toReply(it) }
+        actionExecutor.tryHandleSceneLookIntent(cleaned)?.let { return toReply(it) }
+
+        // Colgar durante llamada activa: «Lázaro cuelga»
+        actionExecutor.tryHandleHangupIntent(cleaned)?.let { return toReply(it) }
+
         if (actionExecutor.hasPendingConfirmation()) {
             return handlePendingConversation(cleaned)
         }
@@ -87,10 +94,25 @@ class GeminiOrchestrator @Inject constructor(
                 }
             }
             ContextIntent.PENDING_HELP -> {
+                val prompt = repeatablePrompt()
+                val hint = actionExecutor.getPendingHint()
                 return AssistantReply(
-                    "Estoy esperando ${actionExecutor.getPendingHint()}. " +
-                        "Responde con sí, no, un número o nombre. " +
-                        "También puedes decir repíteme las opciones o cancela.",
+                    buildString {
+                        if (prompt.isNotBlank()) {
+                            append("Estamos en este paso: ")
+                            append(prompt.trim())
+                            if (!prompt.trimEnd().endsWith('?') && !prompt.trimEnd().endsWith('.')) {
+                                append('.')
+                            }
+                            append(' ')
+                        } else {
+                            append("Estoy esperando $hint. ")
+                        }
+                        append(
+                            "Si te has perdido: di sí o no, un número o un nombre, " +
+                                "repíteme las opciones, o cancela.",
+                        )
+                    },
                     skipAutoLearn = true,
                 )
             }
@@ -101,10 +123,21 @@ class GeminiOrchestrator @Inject constructor(
                 return handleFreeConversation(command)
             }
             ContextIntent.INTERRUPT -> {
-                return AssistantReply("", skipAutoLearn = true, actionTaken = true)
+                actionExecutor.cancelPending()
+                conversationContext.clearPending()
+                return AssistantReply("Vale, paro.", skipAutoLearn = true, actionTaken = true)
             }
             null -> Unit
         }
+
+        // Números / «sí» sobre recientes / query de música: antes del sí genérico
+        actionExecutor.tryHandleMediaSearchSelection(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleMediaSelection(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleRecentMediaSelection(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleAwaitMusicQuery(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleWhatsAppTextDictate(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleWhatsAppVoiceRecipientSelection(userText)?.let { return toReply(it) }
 
         if (actionExecutor.isAffirmative(userText)) {
             return when (val result = actionExecutor.confirmPending()) {
@@ -142,14 +175,14 @@ class GeminiOrchestrator @Inject constructor(
 
         actionExecutor.tryHandleWalkIntent(userText)?.let { return toReply(it) }
 
+        actionExecutor.tryHandleNavigationContextIntent(userText)?.let { return toReply(it) }
+
         actionExecutor.tryHandleRouteIntent(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleSavedPlaceIntent(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleNavigationIntent(userText)?.let { return toReply(it) }
 
-        actionExecutor.tryHandleMediaSearchSelection(userText)?.let { return toReply(it) }
-        actionExecutor.tryHandleMediaSelection(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleTransitSelection(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleBookSelection(userText)?.let { return toReply(it) }
 
@@ -167,11 +200,28 @@ class GeminiOrchestrator @Inject constructor(
             }
         }
 
+        // Sin pending formal, pero pide recordar el último paso
+        if (contextIntentDetector.isLostInStepsPhrase(userText)) {
+            val last = conversationContext.lastPrompt
+            if (last.isNotBlank()) {
+                return AssistantReply(
+                    "El último paso fue: $last. Di Lázaro y tu orden, o pide ayuda otra vez.",
+                    skipAutoLearn = true,
+                )
+            }
+        }
+
         if (contextIntentDetector.detect(userText, hasPending = false) == ContextIntent.INTERRUPT) {
-            return AssistantReply("", skipAutoLearn = true, actionTaken = true)
+            actionExecutor.cancelPending()
+            conversationContext.clearPending()
+            return AssistantReply("Vale, paro.", skipAutoLearn = true, actionTaken = true)
         }
 
         actionExecutor.tryHandleContactSelection(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleSceneLookIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleWhereAmIIntent(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleTimeIntent(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleBatteryIntent(userText)?.let { return toReply(it) }
@@ -182,6 +232,8 @@ class GeminiOrchestrator @Inject constructor(
 
         actionExecutor.tryHandleWalkIntent(userText)?.let { return toReply(it) }
 
+        actionExecutor.tryHandleNavigationContextIntent(userText)?.let { return toReply(it) }
+
         actionExecutor.tryHandleRouteIntent(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleSavedPlaceIntent(userText)?.let { return toReply(it) }
@@ -190,6 +242,8 @@ class GeminiOrchestrator @Inject constructor(
 
         actionExecutor.tryHandleMediaSearchSelection(userText)?.let { return toReply(it) }
         actionExecutor.tryHandleMediaSelection(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleRecentMediaSelection(userText)?.let { return toReply(it) }
+        actionExecutor.tryHandleAwaitMusicQuery(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleTransitSelection(userText)?.let { return toReply(it) }
 
@@ -236,6 +290,12 @@ class GeminiOrchestrator @Inject constructor(
         }
 
         actionExecutor.tryHandleMediaIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleWhatsAppSendIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleMessagesIntent(userText)?.let { return toReply(it) }
+
+        actionExecutor.tryHandleCallIntent(userText)?.let { return toReply(it) }
 
         actionExecutor.tryHandleBookIntent(userText)?.let { return toReply(it) }
 

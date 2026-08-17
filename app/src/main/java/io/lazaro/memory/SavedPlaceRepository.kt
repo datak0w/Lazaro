@@ -54,6 +54,26 @@ class SavedPlaceRepository @Inject constructor(
             .sortedBy { it.displayName.lowercase() }
     }
 
+    /**
+     * Sitios guardados cerca del GPS actual, ordenados por distancia.
+     * Sirven como referencias para ciegos (no solo como destinos).
+     */
+    suspend fun findNearby(
+        latitude: Double,
+        longitude: Double,
+        radiusMeters: Double,
+    ): List<SavedPlace> {
+        return getAllPlaces()
+            .map { place ->
+                place to io.lazaro.navigation.NavigationBearing.distanceMeters(
+                    latitude, longitude, place.latitude, place.longitude,
+                )
+            }
+            .filter { it.second <= radiusMeters }
+            .sortedBy { it.second }
+            .map { it.first }
+    }
+
     suspend fun deletePlace(keyOrAlias: String): Boolean {
         val place = resolvePlace(keyOrAlias) ?: return false
         memoryRepository.deleteMemory(place.key)

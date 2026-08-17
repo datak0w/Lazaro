@@ -19,6 +19,7 @@ import javax.inject.Singleton
 class DistanceAlertManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val textToSpeechManager: TextToSpeechManager,
+    private val sleepModeController: io.lazaro.assistant.SleepModeController,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lastAlertCm = Int.MAX_VALUE
@@ -29,6 +30,7 @@ class DistanceAlertManager @Inject constructor(
             combine(piHubBleManager.state, piHubRepository.config) { state, config ->
                 Triple(state, config, System.currentTimeMillis())
             }.collect { (state, config, now) ->
+                if (sleepModeController.isSleeping()) return@collect
                 if (!state.isConnected || !config.distanceAlertsEnabled) return@collect
                 if (!state.distOk || state.quality < 30) return@collect
 

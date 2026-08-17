@@ -42,10 +42,25 @@ class RearCameraAnalyzer @Inject constructor(
     private var frameListener: ((ByteArray, Int, Int, ImageProxy) -> Unit)? = null
     @Volatile
     private var snapshotWaiter: CompletableDeferred<GrayFrame>? = null
+    @Volatile
+    private var colorSnapshotWaiter: CompletableDeferred<Bitmap>? = null
 
     suspend fun captureBitmapSnapshot(timeoutMs: Long = 2_500L): Bitmap? = withContext(Dispatchers.Default) {
         val frame = captureGraySnapshotInternal(timeoutMs) ?: return@withContext null
         GrayBitmapConverter.toBitmap(frame.bytes, frame.width, frame.height)
+    }
+
+    /** Foto a color para visión (Gemini). */
+    suspend fun captureColorBitmapSnapshot(timeoutMs: Long = 3_000L): Bitmap? = withContext(Dispatchers.Default) {
+        val deferred = CompletableDeferred<Bitmap>()
+        colorSnapshotWaiter = deferred
+        try {
+            withTimeoutOrNull(timeoutMs) { deferred.await() }
+        } finally {
+            if (colorSnapshotWaiter === deferred) {
+                colorSnapshotWaiter = null
+            }
+        }
     }
 
     private suspend fun captureGraySnapshotInternal(timeoutMs: Long = 2_500L): GrayFrame? {
@@ -127,6 +142,16 @@ class RearCameraAnalyzer @Inject constructor(
 
     private fun processFrame(image: ImageProxy) {
         try {
+            val colorWaiter = colorSnapshotWaiter
+            if (colorWaiter != null && colorWaiter.isActive) {
+                val bitmap = YuvToRgbConverter.imageProxyToBitmap(image)
+                if (bitmap != null) {
+                    colorWaiter.complete(bitmap)
+                    colorSnapshotWaiter = null
+                    image.close()
+                    return
+                }
+            }
             val frame = ImageOrientationNormalizer.toUprightGray(image)
             if (frame != null) {
                 val waiter = snapshotWaiter

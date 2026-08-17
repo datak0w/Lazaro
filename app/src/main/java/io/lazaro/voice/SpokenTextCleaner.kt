@@ -1,8 +1,8 @@
 package io.lazaro.voice
 
 /**
- * Limpia texto para TTS: quita markdown y símbolos que el motor lee en voz alta
- * («asterisco asterisco», «almohadilla», etc.).
+ * Limpia texto para TTS: quita markdown. No acorta el contenido
+ * (las respuestas largas deben oírse enteras).
  */
 object SpokenTextCleaner {
 
@@ -33,8 +33,78 @@ object SpokenTextCleaner {
         t = t.replace("*", " ")
         t = t.replace("#", " ")
         t = t.replace("`", " ")
+        // URLs crudas (evitar deletrear http…)
+        t = t.replace(Regex("""https?://\S+"""), " ")
         // Espacios
         t = t.replace(Regex("""\s+"""), " ").trim()
         return t
     }
+
+    /**
+     * Acorta solo cuando se pide explícitamente (tips cortos, etc.).
+     * No usar en respuestas normales del asistente.
+     */
+    fun truncateForSpeech(
+        text: String,
+        maxChars: Int = BRIEF_MAX_CHARS,
+        maxSentences: Int = BRIEF_MAX_SENTENCES,
+    ): String {
+        val t = text.trim()
+        if (t.isEmpty()) return t
+        val sentences = t.split(Regex("""(?<=[.!?…])\s+"""))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        val kept = if (sentences.size <= maxSentences) {
+            sentences
+        } else {
+            sentences.take(maxSentences)
+        }
+        var out = kept.joinToString(" ").trim()
+        if (out.length <= maxChars) return out
+        val cut = out.take(maxChars)
+        val lastSpace = cut.lastIndexOf(' ')
+        out = if (lastSpace >= maxChars / 2) cut.take(lastSpace) else cut
+        return out.trimEnd(',', ';', ':', ' ').trim() +
+            if (out.endsWith('.') || out.endsWith('!') || out.endsWith('?')) "" else "."
+    }
+
+    /** Parte texto largo en trozos seguros para motores TTS (Samsung/Google). */
+    fun chunkForTts(text: String, maxChunkChars: Int = TTS_CHUNK_CHARS): List<String> {
+        val t = text.trim()
+        if (t.isEmpty()) return emptyList()
+        if (t.length <= maxChunkChars) return listOf(t)
+
+        val chunks = mutableListOf<String>()
+        var remaining = t
+        while (remaining.isNotEmpty()) {
+            if (remaining.length <= maxChunkChars) {
+                chunks.add(remaining)
+                break
+            }
+            val window = remaining.take(maxChunkChars)
+            val splitAt = listOf(
+                window.lastIndexOf(". "),
+                window.lastIndexOf("? "),
+                window.lastIndexOf("! "),
+                window.lastIndexOf("… "),
+                window.lastIndexOf("; "),
+                window.lastIndexOf(", "),
+                window.lastIndexOf(' '),
+            ).filter { it >= maxChunkChars / 3 }.maxOrNull()
+
+            if (splitAt == null) {
+                chunks.add(window)
+                remaining = remaining.drop(maxChunkChars).trimStart()
+            } else {
+                val end = splitAt + 1
+                chunks.add(remaining.take(end).trim())
+                remaining = remaining.drop(end).trimStart()
+            }
+        }
+        return chunks.filter { it.isNotBlank() }
+    }
+
+    private const val BRIEF_MAX_CHARS = 220
+    private const val BRIEF_MAX_SENTENCES = 2
+    private const val TTS_CHUNK_CHARS = 350
 }

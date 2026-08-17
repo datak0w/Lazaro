@@ -1,8 +1,5 @@
 package io.lazaro.routes
 
-import io.lazaro.actions.NavigationAction
-import io.lazaro.actions.LocationAction
-import io.lazaro.actions.MapsLaunchDeferrer
 import io.lazaro.navigation.NavigationAudioCoordinator
 import io.lazaro.pathguide.PathGuideController
 import io.lazaro.pathguide.PathGuideMode
@@ -30,9 +27,6 @@ class HybridNavigationCoordinator @Inject constructor(
     private val routeReplayBrain: RouteReplayBrain,
     private val routeMapMatcher: RouteMapMatcher,
     private val routeRepository: RouteRepository,
-    private val navigationAction: NavigationAction,
-    private val locationAction: LocationAction,
-    private val mapsLaunchDeferrer: MapsLaunchDeferrer,
     private val navigationAudioCoordinator: NavigationAudioCoordinator,
     private val routeRecorderController: io.lazaro.routes.recording.RouteRecorderController,
 ) {
@@ -46,15 +40,7 @@ class HybridNavigationCoordinator @Inject constructor(
 
         routeRecorderController.startPassiveLearn(route.id)
 
-        val location = locationAction.getCurrentLocation()
-        mapsLaunchDeferrer.defer {
-            navigationAction.launchWalkingNavigation(
-                destinationLabel,
-                location?.latitude,
-                location?.longitude,
-            )
-        }
-
+        // Sin app Maps: guía in-app con la polilínea grabada + PathGuide/pitidos.
         _state.value = HybridNavState(
             active = true,
             routeId = route.id,

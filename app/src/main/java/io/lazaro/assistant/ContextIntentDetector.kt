@@ -90,6 +90,16 @@ class ContextIntentDetector @Inject constructor() {
             normalized.contains("cuales eran")
     }
 
+    /** Usuario perdido entre pasos (con o sin confirmación pendiente). */
+    fun isLostInStepsPhrase(text: String): Boolean {
+        val normalized = normalize(stripWakeWord(text))
+        if (normalized.isBlank()) return false
+        return matchesAny(normalized, HELP_TRIGGERS) ||
+            matchesAny(normalized, UNCERTAIN_TRIGGERS) ||
+            normalized.contains("en que estabamos") ||
+            normalized.contains("que estabamos haciendo")
+    }
+
     private fun looksLikeNewCommand(text: String): Boolean {
         if (text.contains("lazaro") && text.length > 12) return true
         return COMMAND_VERBS.any { verb -> text.startsWith("$verb ") || text.contains(" $verb ") }
@@ -178,11 +188,15 @@ class ContextIntentDetector @Inject constructor() {
         private val HELP_TRIGGERS = listOf(
             "que tengo que decir", "que digo", "que respondes", "ayuda",
             "que esperas", "que necesitas", "en que quedamos", "que hago",
-            "que debo decir", "como respondo",
+            "que debo decir", "como respondo", "explicame", "explicame otra vez",
+            "explicame la accion", "explica la accion", "que estamos haciendo",
+            "en que paso estoy", "me he perdido", "me confundi", "no entiendo que hacer",
+            "recuerda que estabamos", "en que estabamos",
         )
 
         private val UNCERTAIN_TRIGGERS = listOf(
             "no se", "no lo se", "no se cual", "no se que", "no estoy seguro",
+            "estoy perdido", "me lío", "me lio", "confundido",
         )
 
         private val NEW_COMMAND_TRIGGERS = listOf(

@@ -8,15 +8,15 @@ import org.junit.Test
 class ConversationContextTest {
 
     @Test
-    fun keepsOnlyLastSixTurns() {
+    fun keepsOnlyLastEightTurns() {
         val ctx = ConversationContext()
-        repeat(8) { i ->
+        repeat(10) { i ->
             ctx.recordTurn("u$i", "a$i", sessionMarker = "[nav→casa]")
         }
         val turns = ctx.recentTurns()
-        assertEquals(6, turns.size)
+        assertEquals(8, turns.size)
         assertEquals("u2", turns.first().userMessage)
-        assertEquals("u7", turns.last().userMessage)
+        assertEquals("u9", turns.last().userMessage)
         assertTrue(ctx.formatRecentHistory().contains("CONVERSACIÓN RECIENTE"))
     }
 }

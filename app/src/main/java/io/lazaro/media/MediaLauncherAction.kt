@@ -1,11 +1,19 @@
 package io.lazaro.media
 
 import android.content.Context
+import android.media.AudioManager
+import android.os.SystemClock
+import android.view.KeyEvent
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.lazaro.accessibility.AccessibilityAccessHelper
 import io.lazaro.actions.ActionResult
 import io.lazaro.actions.PendingAction
 import io.lazaro.voice.VoiceOptionParser
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,6 +26,8 @@ class MediaLauncherAction @Inject constructor(
     private val mediaFavoritesRepository: MediaFavoritesRepository,
     private val accessibilityAccessHelper: AccessibilityAccessHelper,
 ) {
+    private val mediaKeyScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
     suspend fun tryPrepare(userText: String): ActionResult? {
         tryPrepareSearch(userText)?.let { return it }
         val category = mediaIntentDetector.detect(userText) ?: return null
@@ -38,13 +48,17 @@ class MediaLauncherAction @Inject constructor(
         val app = resolveSearchApp(trimmedQuery, appHint)
             ?: return askSearchApp(trimmedQuery)
 
-        return ActionResult.NeedsConfirmation(
-            prompt = "¿Busco «$trimmedQuery» en ${app.label}? Di sí o no.",
-            pendingAction = searchPending(trimmedQuery, app),
+        // Sin «sí/no»: poner al momento
+        return confirmSearch(
+            mapOf(
+                "query" to trimmedQuery,
+                "package" to app.packageName,
+                "label" to app.label,
+            ),
         )
     }
 
-    fun confirmSearch(args: Map<String, String>): ActionResult {
+    suspend fun confirmSearch(args: Map<String, String>): ActionResult {
         val query = args["query"].orEmpty().trim()
         val packageName = args["package"].orEmpty()
         val label = args["label"].orEmpty()
@@ -58,14 +72,49 @@ class MediaLauncherAction @Inject constructor(
 
         MediaAutoplayCoordinator.request(packageName, query)
         context.startActivity(intent)
+        // Empujón extra: tecla Play si Spotify ya tiene sesión (y accesibilidad abre el ítem)
+        scheduleMediaPlayNudges(packageName)
+
+        mediaFavoritesRepository.rememberPlay(query, packageName, label)
+        mediaFavoritesRepository.saveFavorite(
+            MediaCategory.MUSIC,
+            InstalledMediaApp(
+                packageName = packageName,
+                label = label.ifBlank { installedMediaAppsResolver.resolveLabel(packageName, packageName) },
+                categories = setOf(MediaCategory.MUSIC),
+            ),
+        )
 
         val spokenLabel = label.ifBlank { installedMediaAppsResolver.resolveLabel(packageName, packageName) }
-        val autoplayHint = if (accessibilityAccessHelper.isAccessibilityEnabled()) {
-            ""
-        } else {
-            " Activa accesibilidad de Lazaro para autoplay fiable."
+        return ActionResult.Success("Pongo «$query» en $spokenLabel.")
+    }
+
+    private fun scheduleMediaPlayNudges(packageName: String) {
+        if (packageName !in setOf(
+                "com.spotify.music",
+                "com.spotify.lite",
+                "com.google.android.apps.youtube.music",
+            )
+        ) {
+            return
         }
-        return ActionResult.Success("Reproduciendo «$query» en $spokenLabel.$autoplayHint")
+        mediaKeyScope.launch {
+            val delays = listOf(2_500L, 4_500L, 7_000L, 10_000L)
+            for (wait in delays) {
+                delay(wait)
+                if (MediaAutoplayCoordinator.peek(packageName) == null) return@launch
+                dispatchMediaPlay()
+            }
+        }
+    }
+
+    private fun dispatchMediaPlay() {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val now = SystemClock.uptimeMillis()
+        val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY, 0)
+        val up = KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY, 0)
+        am.dispatchMediaKeyEvent(down)
+        am.dispatchMediaKeyEvent(up)
     }
 
     private suspend fun resolveSearchApp(query: String, appHint: String): InstalledMediaApp? {
@@ -82,10 +131,23 @@ class MediaLauncherAction @Inject constructor(
             )
         }
 
+        val recent = mediaFavoritesRepository.getRecentPlays(1).firstOrNull()
+        if (recent != null && installedMediaAppsResolver.isInstalled(recent.packageName)) {
+            return InstalledMediaApp(
+                packageName = recent.packageName,
+                label = installedMediaAppsResolver.resolveLabel(recent.packageName, recent.label),
+                categories = setOf(MediaCategory.MUSIC),
+            )
+        }
+
         val capable = installedMediaAppsResolver.getSearchCapableApps()
         if (capable.size == 1) {
             return capable.first()
         }
+        // Preferir Spotify si está
+        capable.firstOrNull {
+            it.packageName == "com.spotify.music" || it.packageName == "com.spotify.lite"
+        }?.let { return it }
 
         return null
     }
@@ -103,7 +165,7 @@ class MediaLauncherAction @Inject constructor(
         }.joinToString(". ")
 
         return ActionResult.NeedsConfirmation(
-            prompt = "¿Dónde busco «$query»? Tienes: $options. Di el número o el nombre.",
+            prompt = "¿Dónde pongo «$query»? Tienes: $options. Di el número o el nombre.",
             pendingAction = PendingAction(
                 toolName = "select_media_search_app",
                 args = installed.take(5).mapIndexed { index, app ->
@@ -124,9 +186,12 @@ class MediaLauncherAction @Inject constructor(
         val app = resolveCandidateSelection(args, selection)
             ?: return ActionResult.Error("No he entendido tu elección. Di el número o el nombre de la app.")
 
-        return ActionResult.NeedsConfirmation(
-            prompt = "¿Busco «$query» en ${app.label}? Di sí o no.",
-            pendingAction = searchPending(query, app),
+        return confirmSearch(
+            mapOf(
+                "query" to query,
+                "package" to app.packageName,
+                "label" to app.label,
+            ),
         )
     }
 
@@ -142,6 +207,10 @@ class MediaLauncherAction @Inject constructor(
     }
 
     suspend fun prepareForCategory(category: MediaCategory): ActionResult {
+        if (category == MediaCategory.MUSIC) {
+            prepareMusicWithMemory()?.let { return it }
+        }
+
         val favorite = mediaFavoritesRepository.getFavorite(category)
         if (favorite != null && installedMediaAppsResolver.isInstalled(favorite.packageName)) {
             val label = installedMediaAppsResolver.resolveLabel(favorite.packageName, favorite.label)
@@ -192,6 +261,106 @@ class MediaLauncherAction @Inject constructor(
         )
     }
 
+    /**
+     * «Pon música» sin query: repite la última al momento, o pregunta qué poner.
+     */
+    private suspend fun prepareMusicWithMemory(): ActionResult? {
+        val recent = mediaFavoritesRepository.getRecentPlays(5)
+            .filter { installedMediaAppsResolver.isInstalled(it.packageName) }
+        if (recent.isNotEmpty()) {
+            val last = recent.first()
+            return confirmSearch(
+                mapOf(
+                    "query" to last.query,
+                    "package" to last.packageName,
+                    "label" to last.label,
+                ),
+            )
+        }
+
+        val favorite = mediaFavoritesRepository.getFavorite(MediaCategory.MUSIC)
+        val spotify = installedMediaAppsResolver.findInstalledByAlias("spotify")
+        val app = when {
+            favorite != null && installedMediaAppsResolver.isInstalled(favorite.packageName) ->
+                InstalledMediaApp(
+                    favorite.packageName,
+                    installedMediaAppsResolver.resolveLabel(favorite.packageName, favorite.label),
+                    setOf(MediaCategory.MUSIC),
+                )
+            spotify != null -> spotify
+            else -> installedMediaAppsResolver.getInstalledForCategory(MediaCategory.MUSIC).firstOrNull()
+        }
+        if (app == null) return null
+
+        return ActionResult.NeedsConfirmation(
+            prompt = "¿Qué pongo?",
+            pendingAction = PendingAction(
+                toolName = "await_music_query",
+                args = mapOf(
+                    "package" to app.packageName,
+                    "label" to app.label,
+                ),
+            ),
+        )
+    }
+
+    suspend fun confirmRecentMediaSelection(args: Map<String, String>, selection: String): ActionResult {
+        val normalized = selection.trim().lowercase()
+        if (normalized in setOf("si", "sí", "vale", "ok", "okay", "claro", "dale", "ponla", "esa")) {
+            val query = args["default_query"].orEmpty()
+            val pkg = args["default_package"].orEmpty()
+            val label = args["default_label"].orEmpty()
+            if (query.isBlank() || pkg.isBlank()) {
+                return ActionResult.Error("No tengo una selección reciente.")
+            }
+            return confirmSearch(
+                mapOf("query" to query, "package" to pkg, "label" to label),
+            )
+        }
+
+        val candidates = args.filterKeys { it.startsWith("candidate_") }
+            .values
+            .mapNotNull { encoded ->
+                val parts = encoded.split("|", limit = 3)
+                if (parts.size == 3) Triple(parts[0], parts[1], parts[2]) else null
+            }
+
+        VoiceOptionParser.parseIndex(selection, candidates.size)?.let { index ->
+            if (index in candidates.indices) {
+                val (pkg, label, query) = candidates[index]
+                return confirmSearch(
+                    mapOf("query" to query, "package" to pkg, "label" to label),
+                )
+            }
+        }
+
+        // El usuario dijo otra cosa → tratar como nueva búsqueda
+        return prepareSearch(selection, "")
+    }
+
+    suspend fun confirmAwaitMusicQuery(args: Map<String, String>, selection: String): ActionResult {
+        val query = selection.trim()
+        val normalized = query.lowercase()
+        if (normalized in setOf("si", "sí", "vale", "ok", "okay", "claro", "dale", "no")) {
+            return ActionResult.Error("Dime un artista, estilo o playlist.")
+        }
+        if (query.length < 2) {
+            return ActionResult.Error("Dime un artista, estilo o playlist.")
+        }
+        val pkg = args["package"].orEmpty()
+        val label = args["label"].orEmpty()
+        if (pkg.isNotBlank()) {
+            return confirmSearch(
+                mapOf(
+                    "query" to query,
+                    "package" to pkg,
+                    "label" to label.ifBlank { "Spotify" },
+                ),
+            )
+        }
+        return prepareSearch(query, "")
+    }
+
     fun resolveSelection(args: Map<String, String>, selection: String): InstalledMediaApp? {
         val category = MediaCategory.fromId(args["category"].orEmpty()) ?: return null
         return resolveCandidateSelection(args, selection, category)
@@ -206,7 +375,7 @@ class MediaLauncherAction @Inject constructor(
             .values
             .mapNotNull { encoded ->
                 val parts = encoded.split("|", limit = 2)
-                if (parts.size == 2) {
+                if (parts.size >= 2) {
                     InstalledMediaApp(parts[0], parts[1], category?.let { setOf(it) } ?: emptySet())
                 } else {
                     null

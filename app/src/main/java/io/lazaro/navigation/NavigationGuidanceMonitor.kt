@@ -3,6 +3,7 @@ package io.lazaro.navigation
 import android.content.Context
 import android.os.Bundle
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.lazaro.pathguide.MapsInstructionType
 import io.lazaro.voice.TextToSpeechManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +24,7 @@ class NavigationGuidanceMonitor @Inject constructor(
     private val textToSpeechManager: TextToSpeechManager,
     private val audioCoordinator: NavigationAudioCoordinator,
     private val mapsVisionFusionCoordinator: MapsVisionFusionCoordinator,
+    private val sleepModeController: io.lazaro.assistant.SleepModeController,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val active = AtomicBoolean(false)
@@ -31,6 +33,8 @@ class NavigationGuidanceMonitor @Inject constructor(
     private var lastAnnouncedMs = 0L
     private var lastActionTip: String? = null
     private var lastMapsHeardMs = 0L
+    private var lastMapsManeuverMs = 0L
+    private var lastMapsInstructionType: MapsInstructionType = MapsInstructionType.OTHER
     private var speakingMaps = false
 
     fun startNavigation() {
@@ -41,6 +45,8 @@ class NavigationGuidanceMonitor @Inject constructor(
         lastAnnouncedMs = 0L
         lastActionTip = null
         lastMapsHeardMs = 0L
+        lastMapsManeuverMs = 0L
+        lastMapsInstructionType = MapsInstructionType.OTHER
     }
 
     fun stopNavigation() {
@@ -52,6 +58,8 @@ class NavigationGuidanceMonitor @Inject constructor(
         lastAnnouncedMs = 0L
         lastActionTip = null
         lastMapsHeardMs = 0L
+        lastMapsManeuverMs = 0L
+        lastMapsInstructionType = MapsInstructionType.OTHER
         textToSpeechManager.stop()
     }
 
@@ -63,10 +71,20 @@ class NavigationGuidanceMonitor @Inject constructor(
 
     fun lastActionTip(): String? = lastActionTip
 
-    /** True si Maps anunció hace menos de [withinMs] (la guía propia debe callar). */
+    /** True si Maps habló de verdad hace menos de [withinMs]. */
     fun hasHeardMapsRecently(withinMs: Long): Boolean {
         if (lastMapsHeardMs <= 0L) return false
         return System.currentTimeMillis() - lastMapsHeardMs < withinMs
+    }
+
+    /**
+     * True si Maps anunció un giro/cruce/llegada reales (no recto/otro).
+     * La guía propia debe ceder el canal solo en estos casos.
+     */
+    fun hasHeardMapsManeuverRecently(withinMs: Long): Boolean {
+        if (lastMapsManeuverMs <= 0L) return false
+        if (System.currentTimeMillis() - lastMapsManeuverMs >= withinMs) return false
+        return lastMapsInstructionType in MANEUVER_TYPES
     }
 
     fun onMapsNotification(extras: Bundle) {
@@ -89,10 +107,11 @@ class NavigationGuidanceMonitor @Inject constructor(
             type = instructionType,
             streetLayout = audioCoordinator.lastStreetLayout(),
         )
-        // Evitar repetir el mismo tip de acción en ráfaga (Maps spamea notifs)
+        if (sleepModeController.isSleeping()) return
+        // Evitar repetir el mismo tip de acción en ráfaga (Maps spamea notifs).
+        // No marcar lastMapsHeardMs aquí: si no hablamos, la guía propia no debe callar.
         if (tip == lastActionTip && System.currentTimeMillis() - lastAnnouncedMs < MIN_SAME_TIP_MS) {
             lastAnnounced = instruction
-            lastMapsHeardMs = System.currentTimeMillis()
             return
         }
 
@@ -101,7 +120,6 @@ class NavigationGuidanceMonitor @Inject constructor(
 
         lastAnnounced = instruction
         lastAnnouncedMs = now
-        lastMapsHeardMs = now
         lastActionTip = tip
 
         scope.launch {
@@ -111,8 +129,13 @@ class NavigationGuidanceMonitor @Inject constructor(
                 awaitSpeechWindow()
                 audioCoordinator.onMapsInstructionStarting(instruction)
                 TurnHapticFeedback.pulseForInstruction(context, instruction)
-                // Tip Lazaro (acción clara + acera + metros), no el texto crudo de Maps
                 textToSpeechManager.speak(tip)
+                // Solo tras speak real
+                lastMapsHeardMs = System.currentTimeMillis()
+                lastMapsInstructionType = instructionType
+                if (instructionType in MANEUVER_TYPES) {
+                    lastMapsManeuverMs = lastMapsHeardMs
+                }
             } finally {
                 audioCoordinator.onMapsInstructionFinished()
                 speakingMaps = false
@@ -137,5 +160,12 @@ class NavigationGuidanceMonitor @Inject constructor(
         private const val MIN_SAME_TIP_MS = 12_000L
         private const val MAX_SPEECH_WAIT_MS = 2_500L
         private const val SPEECH_POLL_MS = 120L
+
+        private val MANEUVER_TYPES = setOf(
+            MapsInstructionType.TURN,
+            MapsInstructionType.CROSS_STREET,
+            MapsInstructionType.ARRIVE,
+            MapsInstructionType.ROUNDABOUT,
+        )
     }
 }

@@ -43,6 +43,10 @@ class WakeWordController @Inject constructor(
         )
     }
 
+    fun setSleepMode(enabled: Boolean) {
+        offlineWakeWordEngine.sleepMode = enabled
+    }
+
     fun start() {
         shouldRun = true
         scope?.launch { startPassiveEngine() }

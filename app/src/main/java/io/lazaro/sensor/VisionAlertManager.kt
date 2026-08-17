@@ -12,6 +12,7 @@ import javax.inject.Singleton
 @Singleton
 class VisionAlertManager @Inject constructor(
     private val textToSpeechManager: TextToSpeechManager,
+    private val sleepModeController: io.lazaro.assistant.SleepModeController,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lastSpokenSummary = ""
@@ -22,6 +23,7 @@ class VisionAlertManager @Inject constructor(
             combine(piHubBleManager.state, piHubRepository.config) { state, config ->
                 state to config
             }.collect { (state, config) ->
+                if (sleepModeController.isSleeping()) return@collect
                 if (!state.isConnected || !config.visionTtsEnabled) return@collect
                 val summary = state.visionSummary.trim()
                 if (summary.isBlank() || summary == lastSpokenSummary) return@collect

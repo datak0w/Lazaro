@@ -13,8 +13,14 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.lazaro.messaging.MessageRepository
 import io.lazaro.messaging.NotificationAccessHelper
+import io.lazaro.messaging.LazaroNotificationListenerService
+import io.lazaro.messaging.entity.MessageApps
 import io.lazaro.navigation.MapsLaunchActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -25,17 +31,17 @@ class NavigationAction @Inject constructor(
 ) {
     private val packageManager get() = context.packageManager
 
+    /**
+     * Navegación peatonal in-app (Directions + PathGuide).
+     * Ya no abre la app Google Maps; [launchWalkingNavigation] queda como no-op que indica éxito
+     * para el flujo de sesión (compatibilidad con deferrers).
+     */
     suspend fun navigateTo(destination: String): ActionResult {
         if (destination.isBlank()) {
             return ActionResult.Error("No he entendido el destino. ¿A dónde quieres ir?")
         }
-
-        if (!launchWalkingNavigation(destination)) {
-            return ActionResult.Error("No pude abrir la navegación hacia $destination.")
-        }
-
         return ActionResult.Success(
-            "Navegación a pie iniciada hacia $destination.",
+            "Te guío a pie hasta $destination.",
             suspendListening = true,
         )
     }
@@ -46,13 +52,9 @@ class NavigationAction @Inject constructor(
         label: String,
         distanceMeters: Int = 0,
     ): ActionResult {
-        if (!launchWalkingNavigationToCoordinates(latitude, longitude, label)) {
-            return ActionResult.Error("No pude abrir la navegación hacia $label.")
-        }
-
         val distanceHint = if (distanceMeters > 0) " Está a unos $distanceMeters metros." else ""
         return ActionResult.Success(
-            "Navegación a pie iniciada hacia $label.$distanceHint",
+            "Te guío a pie hasta $label.$distanceHint",
             suspendListening = true,
         )
     }
@@ -80,8 +82,9 @@ class NavigationAction @Inject constructor(
         "Confirma la ruta en transporte público antes de abrir Maps.",
     )
 
+    /** Compat: no abre Maps; la sesión in-app la arranca el AssistantController. */
     suspend fun launchWalkingNavigation(destination: String): Boolean {
-        return launchWalkingNavigation(destination, null, null)
+        return destination.isNotBlank()
     }
 
     suspend fun launchWalkingNavigation(
@@ -89,10 +92,7 @@ class NavigationAction @Inject constructor(
         originLat: Double?,
         originLng: Double?,
     ): Boolean {
-        if (destination.isBlank()) return false
-        return launchFirstResolvable(
-            buildWalkingNavigationIntents(destination, originLat = originLat, originLng = originLng),
-        )
+        return destination.isNotBlank()
     }
 
     suspend fun launchWalkingNavigationToCoordinates(
@@ -100,7 +100,7 @@ class NavigationAction @Inject constructor(
         longitude: Double,
         label: String,
     ): Boolean {
-        return launchWalkingNavigationToCoordinates(latitude, longitude, label, null, null)
+        return label.isNotBlank() || (latitude != 0.0 || longitude != 0.0)
     }
 
     suspend fun launchWalkingNavigationToCoordinates(
@@ -110,14 +110,7 @@ class NavigationAction @Inject constructor(
         originLat: Double?,
         originLng: Double?,
     ): Boolean {
-        return launchFirstResolvable(
-            buildWalkingNavigationIntents(
-                "$latitude,$longitude",
-                label = label,
-                originLat = originLat,
-                originLng = originLng,
-            ),
-        )
+        return label.isNotBlank() || (latitude != 0.0 || longitude != 0.0)
     }
 
     suspend fun launchTransitRoute(
@@ -139,55 +132,6 @@ class NavigationAction @Inject constructor(
             if (isMapsInstalled()) setPackage(GOOGLE_MAPS_PACKAGE)
         }
         return launchFirstResolvable(listOf(intent, buildGeoFallbackIntent(destination)))
-    }
-
-    private fun buildWalkingNavigationIntents(
-        destination: String,
-        label: String? = null,
-        originLat: Double? = null,
-        originLng: Double? = null,
-    ): List<Intent> {
-        val encodedDestination = Uri.encode(destination)
-        val intents = mutableListOf<Intent>()
-
-        if (isMapsInstalled()) {
-            val dirUri = Uri.parse("https://www.google.com/maps/dir/?api=1")
-                .buildUpon()
-                .appendQueryParameter("destination", destination)
-                .appendQueryParameter("travelmode", "walking")
-                .appendQueryParameter("dir_action", "navigate")
-            if (originLat != null && originLng != null) {
-                dirUri.appendQueryParameter("origin", "$originLat,$originLng")
-            }
-
-            intents += Intent(Intent.ACTION_VIEW, dirUri.build()).apply {
-                setPackage(GOOGLE_MAPS_PACKAGE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-
-            intents += Intent(
-                Intent.ACTION_VIEW,
-                "google.navigation:q=$encodedDestination&mode=w".toUri(),
-            ).apply {
-                setPackage(GOOGLE_MAPS_PACKAGE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-
-            val previewUri = Uri.parse("https://www.google.com/maps/dir/?api=1")
-                .buildUpon()
-                .appendQueryParameter("destination", destination)
-                .appendQueryParameter("travelmode", "walking")
-            if (originLat != null && originLng != null) {
-                previewUri.appendQueryParameter("origin", "$originLat,$originLng")
-            }
-            intents += Intent(Intent.ACTION_VIEW, previewUri.build()).apply {
-                setPackage(GOOGLE_MAPS_PACKAGE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        }
-
-        intents += buildGeoFallbackIntent(label ?: destination, destination)
-        return intents
     }
 
     private fun buildGeoFallbackIntent(query: String, coordinates: String? = null): Intent {
@@ -232,15 +176,19 @@ class LocationAction @Inject constructor(
 ) {
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
 
-    data class UserLocation(val latitude: Double, val longitude: Double)
+    data class UserLocation(
+        val latitude: Double,
+        val longitude: Double,
+        val ageMs: Long = 0L,
+    )
 
+    /**
+     * Ubicación rápida: lastLocation reciente primero; si no, fix fresco con timeout corto.
+     */
     suspend fun getCurrentLocation(): UserLocation? {
         return try {
-            val location = fusedLocationClient.getCurrentLocation(
-                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
-                CancellationTokenSource().token,
-            ).await() ?: return null
-            UserLocation(location.latitude, location.longitude)
+            recentLastLocation()
+                ?: freshLocation(FRESH_FIX_TIMEOUT_MS)
         } catch (_: SecurityException) {
             null
         } catch (_: Exception) {
@@ -250,31 +198,12 @@ class LocationAction @Inject constructor(
 
     suspend fun whereAmI(): ActionResult {
         return try {
-            val location = fusedLocationClient.getCurrentLocation(
-                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
-                CancellationTokenSource().token,
-            ).await()
-
-            if (location == null) {
-                return ActionResult.Error(
+            val location = getCurrentLocation()
+                ?: return ActionResult.Error(
                     "No pude obtener tu ubicación. Comprueba que el GPS esté activado.",
                 )
-            }
 
-            if (!Geocoder.isPresent()) {
-                return ActionResult.Success(
-                    "Estás en las coordenadas ${location.latitude}, ${location.longitude}.",
-                )
-            }
-
-            @Suppress("DEPRECATION")
-            val addresses = Geocoder(context, Locale.getDefault()).getFromLocation(
-                location.latitude,
-                location.longitude,
-                1,
-            )
-
-            val addressLine = addresses?.firstOrNull()?.getAddressLine(0)
+            val addressLine = reverseGeocodeFast(location.latitude, location.longitude)
             if (addressLine.isNullOrBlank()) {
                 ActionResult.Success(
                     "Estás en las coordenadas ${location.latitude}, ${location.longitude}.",
@@ -288,12 +217,74 @@ class LocationAction @Inject constructor(
             ActionResult.Error("No pude obtener tu ubicación: ${e.localizedMessage ?: "error desconocido"}.")
         }
     }
+
+    private suspend fun recentLastLocation(): UserLocation? {
+        return try {
+            @Suppress("DEPRECATION")
+            val last = fusedLocationClient.lastLocation.await() ?: return null
+            val age = System.currentTimeMillis() - last.time
+            if (age < 0 || age > MAX_LAST_LOCATION_AGE_MS) return null
+            if (last.latitude == 0.0 && last.longitude == 0.0) return null
+            UserLocation(last.latitude, last.longitude, ageMs = age)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private suspend fun freshLocation(timeoutMs: Long): UserLocation? {
+        val cts = CancellationTokenSource()
+        return try {
+            withTimeout(timeoutMs) {
+                val location = fusedLocationClient.getCurrentLocation(
+                    Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                    cts.token,
+                ).await() ?: return@withTimeout null
+                UserLocation(location.latitude, location.longitude, ageMs = 0L)
+            }
+        } catch (_: TimeoutCancellationException) {
+            null
+        } catch (_: Exception) {
+            null
+        } finally {
+            try {
+                cts.cancel()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private suspend fun reverseGeocodeFast(lat: Double, lon: Double): String? {
+        if (!Geocoder.isPresent()) return null
+        return try {
+            withTimeout(GEOCODER_TIMEOUT_MS) {
+                withContext(Dispatchers.IO) {
+                    @Suppress("DEPRECATION")
+                    Geocoder(context, Locale.getDefault())
+                        .getFromLocation(lat, lon, 1)
+                        ?.firstOrNull()
+                        ?.getAddressLine(0)
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    companion object {
+        /** lastLocation usable hasta 3 min (voz rápida en interior). */
+        private const val MAX_LAST_LOCATION_AGE_MS = 180_000L
+        private const val FRESH_FIX_TIMEOUT_MS = 4_500L
+        private const val GEOCODER_TIMEOUT_MS = 2_500L
+    }
 }
 
 @Singleton
 class MessagesAction @Inject constructor(
     private val messageRepository: MessageRepository,
     private val notificationAccessHelper: NotificationAccessHelper,
+    private val replyContext: io.lazaro.messaging.ReplyContext,
+    private val contactResolver: io.lazaro.contacts.ContactResolver,
+    private val whatsAppVoiceNoteAction: io.lazaro.messaging.WhatsAppVoiceNoteAction,
 ) {
     suspend fun readMessages(): ActionResult {
         if (!notificationAccessHelper.isNotificationListenerEnabled()) {
@@ -303,6 +294,32 @@ class MessagesAction @Inject constructor(
                     "Te abro los ajustes. Activa Lazaro y vuelve a pedírmelo.",
             )
         }
-        return ActionResult.Success(messageRepository.buildSpokenSummary())
+        // Reescanea la barra: mensajes ya presentes no llegan solo por onNotificationPosted.
+        LazaroNotificationListenerService.syncActiveMessages()
+        val summary = messageRepository.buildSpokenSummary()
+        if (summary.startsWith("No tienes")) {
+            return ActionResult.Success(summary)
+        }
+        val sender = replyContext.lastSender ?: return ActionResult.Success(summary)
+        val contact = contactResolver.findSingleOrNull(sender)
+            ?: contactResolver.findContacts(sender).firstOrNull()
+        val name = contact?.displayName ?: sender
+        val phone = contact?.phoneNumber.orEmpty()
+        val pkg = replyContext.lastSenderPackage.orEmpty()
+        // Oferta de respuesta = siempre canal WhatsApp (no reenviar por SMS).
+        val waPkg = when (pkg) {
+            MessageApps.WHATSAPP_BUSINESS -> MessageApps.WHATSAPP_BUSINESS
+            else -> MessageApps.WHATSAPP
+        }
+        val offer = whatsAppVoiceNoteAction.prepareOfferReply(name, phone, waPkg)
+        // Anteponer el resumen leído al prompt de oferta (corto al final).
+        return if (offer is ActionResult.NeedsConfirmation) {
+            ActionResult.NeedsConfirmation(
+                prompt = "$summary ${offer.prompt}",
+                pendingAction = offer.pendingAction,
+            )
+        } else {
+            ActionResult.Success(summary)
+        }
     }
 }

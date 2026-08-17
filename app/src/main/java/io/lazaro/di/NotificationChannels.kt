@@ -3,13 +3,13 @@ package io.lazaro.di
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
-import android.media.AudioAttributes
 import android.os.Build
 import io.lazaro.R
 
 object NotificationChannels {
     const val ASSISTANT_CHANNEL_ID = "lazaro_assistant"
-    const val WAKE_WORD_CHANNEL_ID = "lazaro_wake_word"
+    /** Canal sin sonido de sistema: el chirp lo hace ListeningCueTone. */
+    const val WAKE_WORD_CHANNEL_ID = "lazaro_wake_word_v2"
     const val CANE_CHANNEL_ID = "lazaro_cane"
 
     fun create(context: Context) {
@@ -37,19 +37,21 @@ object NotificationChannels {
         }
         manager.createNotificationChannel(caneChannel)
 
+        // Borrar canal antiguo con sonido de notificación del sistema
+        try {
+            manager.deleteNotificationChannel("lazaro_wake_word")
+        } catch (_: Exception) {
+        }
+
         val wakeWordChannel = NotificationChannel(
             WAKE_WORD_CHANNEL_ID,
             context.getString(R.string.wake_word_channel_name),
-            NotificationManager.IMPORTANCE_HIGH,
+            NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
             description = context.getString(R.string.wake_word_channel_desc)
-            enableVibration(true)
+            setSound(null, null)
+            enableVibration(false)
             setShowBadge(false)
-            val audio = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-            setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, audio)
         }
         manager.createNotificationChannel(wakeWordChannel)
     }

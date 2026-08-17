@@ -42,8 +42,8 @@ class RouteAction @Inject constructor(
         val route = resolved.route
         val runs = route.runCount
         val runsText = if (runs > 1) ", con $runs recorridos" else ""
-        val prompt = "Ya tenemos la ruta a ${resolved.destinationLabel} guardada$runsText. " +
-            "¿La usamos con guía Lazaro y Maps?"
+        val prompt = "Tengo tu ruta grabada a ${resolved.destinationLabel}$runsText. " +
+            "¿Te guío por esa ruta? Es la preferida frente a una ruta genérica."
         return ActionResult.NeedsConfirmation(
             prompt = prompt,
             pendingAction = PendingAction(
@@ -65,8 +65,8 @@ class RouteAction @Inject constructor(
         val started = hybridNavigationCoordinator.start(route, destination)
         return if (started) {
             ActionResult.Success(
-                "Perfecto. Uso la ruta guardada ${route.name} con Maps y guía Lazaro. " +
-                    "Cada paseo afina heatmaps y obstáculos para la próxima vez.",
+                "Te guío por tu ruta grabada ${route.name} hacia $destination. " +
+                    "Pitidos y cámara activos. Di para cuando quieras terminar.",
                 suspendListening = true,
             )
         } else {

@@ -5,6 +5,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import dagger.hilt.android.AndroidEntryPoint
 import io.lazaro.media.MediaAutoplayCoordinator
+import io.lazaro.media.MediaAutoplayPhase
 import io.lazaro.messaging.entity.MessageApps
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,7 +45,7 @@ class LazaroAccessibilityService : AccessibilityService() {
         }
 
         val attempts = mediaAutoplayAttempts.getOrDefault(packageName, 0)
-        if (attempts >= 8) {
+        if (attempts >= 24) {
             MediaAutoplayCoordinator.markCompleted()
             mediaAutoplayAttempts.remove(packageName)
             return
@@ -52,11 +53,40 @@ class LazaroAccessibilityService : AccessibilityService() {
         mediaAutoplayAttempts[packageName] = attempts + 1
 
         scope.launch {
-            delay(if (attempts == 0) 1_400L else 900L)
+            val delayMs = when {
+                attempts == 0 -> 2_200L
+                attempts < 3 -> 1_400L
+                attempts < 8 -> 1_000L
+                else -> 800L
+            }
+            delay(delayMs)
             val root = rootInActiveWindow ?: return@launch
-            if (MediaAutoplayAccessibility.tryAutoplay(packageName, root)) {
-                MediaAutoplayCoordinator.markCompleted()
-                mediaAutoplayAttempts.remove(packageName)
+            val pending = MediaAutoplayCoordinator.peek(packageName)
+            if (pending == null) {
+                root.recycle()
+                return@launch
+            }
+            when (
+                MediaAutoplayAccessibility.tryAutoplay(
+                    packageName,
+                    root,
+                    pending.phase,
+                )
+            ) {
+                AutoplayActionResult.DONE -> {
+                    MediaAutoplayCoordinator.markCompleted()
+                    mediaAutoplayAttempts.remove(packageName)
+                }
+                AutoplayActionResult.PROGRESS -> {
+                    MediaAutoplayCoordinator.advancePhase(
+                        packageName,
+                        MediaAutoplayPhase.OPENED_ITEM,
+                    )
+                    // Tras abrir un resultado, reintentar Play enseguida
+                    mediaAutoplayAttempts[packageName] =
+                        mediaAutoplayAttempts.getOrDefault(packageName, 0).coerceAtMost(4)
+                }
+                AutoplayActionResult.NONE -> Unit
             }
             root.recycle()
         }

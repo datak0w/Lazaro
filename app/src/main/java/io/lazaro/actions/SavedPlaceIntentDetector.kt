@@ -27,9 +27,10 @@ class SavedPlaceIntentDetector @Inject constructor() {
     fun extractPlaceName(userText: String): String? {
         val text = normalize(userText)
         val patterns = listOf(
-            Regex("""guarda(?:r)?\s+(?:la\s+)?(?:posicion|posición|sitio|lugar|ubicacion|ubicación)\s+(?:como\s+)?(.+)"""),
-            Regex("""guarda(?:r)?\s+(?:este\s+)?(?:sitio|lugar|punto)\s+(?:como\s+)?(.+)"""),
-            Regex("""marca(?:r)?\s+(?:este\s+)?(?:sitio|lugar|punto)\s+(?:como\s+)?(.+)"""),
+            Regex("""guarda(?:r)?\s+(?:la\s+)?(?:posicion|posición|sitio|lugar|ubicacion|ubicación|referencia)\s+(?:como\s+)?(.+)"""),
+            Regex("""guarda(?:r)?\s+(?:este\s+)?(?:sitio|lugar|punto|referencia)\s+(?:como\s+)?(.+)"""),
+            Regex("""marca(?:r)?\s+(?:este\s+)?(?:sitio|lugar|punto|referencia)\s+(?:como\s+)?(.+)"""),
+            Regex("""punto\s+de\s+referencia\s+(.+)"""),
             Regex("""borra(?:r)?\s+(?:el\s+)?(?:sitio|lugar)\s+(.+)"""),
             Regex("""elimina(?:r)?\s+(?:el\s+)?(?:sitio|lugar)\s+(.+)"""),
         )
@@ -61,6 +62,8 @@ class SavedPlaceIntentDetector @Inject constructor() {
             "guarda este sitio", "guarda este lugar", "guarda ubicacion", "guarda ubicación",
             "marca sitio", "marca este sitio", "marca lugar", "marca este lugar",
             "guarda punto", "guardar punto",
+            "guarda referencia", "guardar referencia", "marca referencia",
+            "punto de referencia", "guarda como referencia",
         )
 
         private val LIST_TRIGGERS = listOf(

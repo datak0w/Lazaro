@@ -7,10 +7,10 @@ import io.lazaro.cane.CaneButtonAction
  *
  * WeWALK 2 (SM-A346B, ago 2026) — mapa capturado en secuencia:
  * - 02 = centro (Select) → LISTEN
- * - 01 = arriba → WHERE_AM_I
+ * - 01 = arriba → WHERE_AM_I (foto / «qué ves»)
  * - 00 = abajo → CANCEL
- * - 05 = volumen + → VOLUME_UP
- * - 04 = volumen − → VOLUME_DOWN
+ * - 05 = volumen + → VOLUME_UP (doble → ¿dónde estoy?)
+ * - 04 = volumen − → VOLUME_DOWN (doble → modo dormir)
  */
 object WeWalkP2pButtons {
 

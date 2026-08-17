@@ -8,6 +8,7 @@ import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +42,10 @@ class SpeechRecognitionManager @Inject constructor(
     private var onResultCallback: ((String) -> Unit)? = null
     private var onErrorCallback: ((message: String, silent: Boolean) -> Unit)? = null
 
+    /** Último parcial: Samsung a veces no entrega onResults y sí parciales. */
+    @Volatile
+    private var lastPartial: String = ""
+
     fun isAvailable(): Boolean = SpeechRecognizer.isRecognitionAvailable(context)
 
     fun isActive(): Boolean = isListening
@@ -58,6 +63,7 @@ class SpeechRecognitionManager @Inject constructor(
         listeningMode = ListeningMode.ACTIVE_COMMAND
         onResultCallback = onResult
         onErrorCallback = onError
+        lastPartial = ""
         startSession(ListeningMode.ACTIVE_COMMAND)
     }
 
@@ -74,22 +80,30 @@ class SpeechRecognitionManager @Inject constructor(
         listeningMode = ListeningMode.DIRECT_RESPONSE
         onResultCallback = onResult
         onErrorCallback = onError
+        lastPartial = ""
         startSession(ListeningMode.DIRECT_RESPONSE)
     }
 
     fun stopListening() {
         listeningMode = null
         isListening = false
-        speechRecognizer?.cancel()
         onResultCallback = null
         onErrorCallback = null
+        lastPartial = ""
+        try {
+            speechRecognizer?.cancel()
+        } catch (_: Exception) {
+        }
         _partialText.value = ""
         _audioLevel.value = 0f
     }
 
     fun releaseRecognizer() {
         stopListening()
-        speechRecognizer?.destroy()
+        try {
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {
+        }
         speechRecognizer = null
     }
 
@@ -101,7 +115,17 @@ class SpeechRecognitionManager @Inject constructor(
         if (listeningMode != mode) return
         isListening = true
         ensureRecognizer()
-        speechRecognizer?.startListening(buildIntent(mode))
+        try {
+            speechRecognizer?.startListening(buildIntent(mode))
+        } catch (e: Exception) {
+            Log.e(TAG, "startListening falló: ${e.message}", e)
+            isListening = false
+            listeningMode = null
+            val err = onErrorCallback
+            onResultCallback = null
+            onErrorCallback = null
+            err?.invoke("No pude abrir el micrófono.", false)
+        }
     }
 
     private fun ensureRecognizer() {
@@ -131,14 +155,10 @@ class SpeechRecognitionManager @Inject constructor(
         }
     }
 
-    private fun endActiveSession() {
-        isListening = false
-        speechRecognizer?.cancel()
-    }
-
     private val recognitionListener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
             _partialText.value = ""
+            lastPartial = ""
         }
 
         override fun onBeginningOfSpeech() = Unit
@@ -153,8 +173,9 @@ class SpeechRecognitionManager @Inject constructor(
         override fun onEndOfSpeech() = Unit
 
         override fun onError(error: Int) {
-            val mode = listeningMode ?: return
-
+            if (listeningMode == null && onErrorCallback == null && onResultCallback == null) {
+                return
+            }
             isListening = false
             val silent = error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
             val message = if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
@@ -163,19 +184,40 @@ class SpeechRecognitionManager @Inject constructor(
                 ""
             }
 
-            when (mode) {
-                ListeningMode.ACTIVE_COMMAND,
-                ListeningMode.DIRECT_RESPONSE,
-                -> {
-                    endActiveSession()
-                    onErrorCallback?.invoke(message, silent)
-                }
+            val partial = lastPartial.trim()
+            val resultCb = onResultCallback
+            val errorCb = onErrorCallback
+            onResultCallback = null
+            onErrorCallback = null
+            listeningMode = null
+            lastPartial = ""
+            _audioLevel.value = 0f
+
+            // Samsung: a menudo ERROR_NO_MATCH / CLIENT tras hablar, con parcial bueno.
+            if (partial.length >= 2 &&
+                resultCb != null &&
+                error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
+            ) {
+                Log.i(TAG, "STT onError($error) usando parcial: ${partial.take(80)}")
+                mainHandler.post { resultCb.invoke(partial) }
+                return
+            }
+
+            Log.i(TAG, "STT onError code=$error silent=$silent")
+            if (errorCb != null) {
+                mainHandler.post { errorCb.invoke(message, silent) }
             }
         }
 
         override fun onResults(results: Bundle?) {
-            val mode = listeningMode ?: return
+            // Capturar callbacks ANTES de tocar el recognizer.
+            // No llamar cancel() aquí: en Samsung provoca onError y pierde el resultado.
+            val resultCb = onResultCallback
+            val errorCb = onErrorCallback
             isListening = false
+            listeningMode = null
+            onResultCallback = null
+            onErrorCallback = null
 
             val candidates = results
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -183,19 +225,20 @@ class SpeechRecognitionManager @Inject constructor(
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
 
-            val bestMatch = candidates.firstOrNull()
+            val bestMatch = candidates.firstOrNull()?.takeIf { it.isNotBlank() }
+                ?: lastPartial.trim().takeIf { it.length >= 2 }
+            lastPartial = ""
+            _partialText.value = ""
+            _audioLevel.value = 0f
 
-            when (mode) {
-                ListeningMode.ACTIVE_COMMAND,
-                ListeningMode.DIRECT_RESPONSE,
-                -> {
-                    endActiveSession()
-                    if (bestMatch != null) {
-                        onResultCallback?.invoke(bestMatch)
-                    } else {
-                        onErrorCallback?.invoke("", true)
-                    }
-                }
+            if (bestMatch != null && resultCb != null) {
+                Log.i(TAG, "STT onResults: ${bestMatch.take(80)}")
+                mainHandler.post { resultCb.invoke(bestMatch) }
+            } else if (errorCb != null) {
+                Log.i(TAG, "STT onResults vacío")
+                mainHandler.post { errorCb.invoke("", true) }
+            } else {
+                Log.w(TAG, "STT onResults sin callback (resultado descartado)")
             }
         }
 
@@ -204,11 +247,17 @@ class SpeechRecognitionManager @Inject constructor(
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()
                 .orEmpty()
+                .trim()
             if (text.isNotBlank()) {
+                lastPartial = text
                 _partialText.value = text
             }
         }
 
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
+    }
+
+    companion object {
+        private const val TAG = "LazaroSTT"
     }
 }

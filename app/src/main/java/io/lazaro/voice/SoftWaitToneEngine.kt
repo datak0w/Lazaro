@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -11,17 +12,21 @@ import javax.inject.Singleton
 
 /**
  * Tono de “cargando” mientras Lázaro procesa.
- * Pulsos audibles vía [CueAudioPlayer] (mismo eje que TTS).
+ * Se calla al instante si empieza a hablar el TTS (sin solaparse con la voz).
  */
 @Singleton
 class SoftWaitToneEngine @Inject constructor(
     private val cueAudioPlayer: CueAudioPlayer,
+    private val textToSpeechManager: TextToSpeechManager,
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + Job())
     private var loopJob: Job? = null
     private var startJob: Job? = null
+    private var gateJob: Job? = null
     @Volatile
     private var running = false
+    @Volatile
+    private var heldForSpeech = false
 
     private val pulsePcm: ShortArray by lazy {
         cueAudioPlayer.generateTwoTonePulse(
@@ -32,27 +37,47 @@ class SoftWaitToneEngine @Inject constructor(
         )
     }
 
-    /** Arranca tras un pequeño retardo para evitar chirps en respuestas instantáneas. */
+    init {
+        gateJob = scope.launch {
+            textToSpeechManager.isSpeaking.collectLatest { speaking ->
+                if (speaking) {
+                    // Voz tiene prioridad absoluta: corta el pulso en curso.
+                    heldForSpeech = true
+                    cueAudioPlayer.stopCurrent()
+                } else if (heldForSpeech) {
+                    heldForSpeech = false
+                }
+            }
+        }
+    }
+
+    /** Arranca tras un retardo para no chirriar en respuestas instantáneas. */
     fun startDelayed() {
-        if (running) return
+        if (running || textToSpeechManager.isSpeaking.value) return
         startJob?.cancel()
         startJob = scope.launch {
             delay(START_DELAY_MS)
             if (!isActive) return@launch
+            if (textToSpeechManager.isSpeaking.value) return@launch
             startNow()
         }
     }
 
     fun startNow() {
-        if (running) return
+        if (running || textToSpeechManager.isSpeaking.value) return
         running = true
+        heldForSpeech = false
         startJob?.cancel()
         startJob = null
         loopJob?.cancel()
         loopJob = scope.launch(Dispatchers.IO) {
             while (isActive && running) {
+                if (textToSpeechManager.isSpeaking.value || heldForSpeech) {
+                    delay(PULSE_GAP_MS)
+                    continue
+                }
                 cueAudioPlayer.playMonoPcm(pulsePcm)
-                if (!running) break
+                if (!running || textToSpeechManager.isSpeaking.value) break
                 delay(PULSE_GAP_MS)
             }
         }
@@ -60,16 +85,19 @@ class SoftWaitToneEngine @Inject constructor(
 
     fun stop() {
         running = false
+        heldForSpeech = false
         startJob?.cancel()
         startJob = null
         loopJob?.cancel()
         loopJob = null
+        cueAudioPlayer.stopCurrent()
     }
 
     companion object {
-        private const val AMPLITUDE = 0.38f
-        private const val PULSE_MS = 340
-        private const val PULSE_GAP_MS = 520L
-        private const val START_DELAY_MS = 200L
+        private const val AMPLITUDE = 0.32f
+        private const val PULSE_MS = 280
+        private const val PULSE_GAP_MS = 700L
+        /** Más retardo: evita solaparse con «Un momento» / frases cortas. */
+        private const val START_DELAY_MS = 550L
     }
 }

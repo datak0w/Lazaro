@@ -20,11 +20,19 @@ object WeWalkDevice {
     const val CHAR_BATTERY = "00002a19-0000-1000-8000-00805f9b34fb"
     const val CHAR_BATTERY_EXT = "00002beb-0000-1000-8000-00805f9b34fb"
 
-    /** Botones: Boot HID (Samsung) + P2P fe42 + batería. */
+    /**
+     * Canales a suscribir: botones + batería + fe45 (status A5 5A) + UART/042F.
+     * Notify 13 = IMU (~10 Hz); no aporta ultrasonido y satura logcat.
+     */
     val NOTIFY_CANDIDATES = listOf(
         CHAR_HID_BOOT_KB,
         CHAR_RX_FE42,
         CHAR_BATTERY,
+        CHAR_FE45,
+        CHAR_UART_01,
+        CHAR_UART_02,
+        CHAR_UART_25,
+        CHAR_CUSTOM_042F,
     )
 
     fun matchesDeviceName(name: String?): Boolean {

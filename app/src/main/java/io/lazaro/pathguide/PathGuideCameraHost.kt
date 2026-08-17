@@ -1,9 +1,7 @@
 package io.lazaro.pathguide
 
-import android.content.Context
 import android.util.Log
 import androidx.camera.core.ImageProxy
-import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,7 +31,24 @@ class PathGuideCameraHost @Inject constructor(
         val capabilities = depthHardwareDetector.detect(depthEnhancedEnabled)
         activeCapabilities = capabilities
         return when (capabilities.mode) {
-            DepthGuidanceMode.ARCORE_DEPTH -> arcorePathGuideCamera.start()
+            DepthGuidanceMode.ARCORE_DEPTH -> {
+                val arOk = try {
+                    arcorePathGuideCamera.start()
+                } catch (e: Exception) {
+                    Log.e(TAG, "ARCore start lanzó excepción; fallback CameraX", e)
+                    false
+                }
+                if (arOk) {
+                    true
+                } else {
+                    Log.w(TAG, "ARCore no arrancó; usando CameraX monocular")
+                    activeCapabilities = capabilities.copy(
+                        mode = DepthGuidanceMode.MONOCULAR,
+                        reason = "ARCore falló al abrir; fallback CameraX",
+                    )
+                    rearCameraAnalyzer.start()
+                }
+            }
             DepthGuidanceMode.MONOCULAR,
             DepthGuidanceMode.LDAF_ONLY,
             -> rearCameraAnalyzer.start()
@@ -57,4 +72,8 @@ class PathGuideCameraHost @Inject constructor(
     }
 
     fun activeCapabilities(): DepthHardwareCapabilities? = activeCapabilities
+
+    companion object {
+        private const val TAG = "PathGuideCameraHost"
+    }
 }

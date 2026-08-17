@@ -20,5 +20,6 @@ object MemoryCategory {
     const val CONTACT = "contact"
     const val PREFERENCE = "preference"
     const val PLACE = "place"
+    const val STREET_SIDE = "street_side"
     const val CUSTOM = "custom"
 }

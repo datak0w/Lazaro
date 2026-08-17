@@ -32,6 +32,10 @@ class OfflineWakeWordEngine @Inject constructor(
     private var onErrorCallback: ((String) -> Unit)? = null
     private var lastDetectionMs = 0L
 
+    /** En modo dormir solo dispara con «Lázaro despierta», no con «Lázaro» solo. */
+    @Volatile
+    var sleepMode: Boolean = false
+
     fun isRunning(): Boolean = running.get()
 
     suspend fun ensureModel(): Result<String> = withContext(Dispatchers.IO) {
@@ -166,8 +170,6 @@ class OfflineWakeWordEngine @Inject constructor(
     }
 
     private fun matchesWakeHypothesis(text: String): Boolean {
-        if (WakeWordDetector.containsWakeWord(text)) return true
-
         val compact = text
             .lowercase()
             .replace(Regex("[^a-záéíóúñ]"), "")
@@ -176,6 +178,21 @@ class OfflineWakeWordEngine @Inject constructor(
             .replace('í', 'i')
             .replace('ó', 'o')
             .replace('ú', 'u')
+
+        if (sleepMode) {
+            // Frase completa: lazaro/variante + despierta/despertar
+            val hasLazaro = compact.contains("lazaro") ||
+                compact.contains("lasaro") ||
+                compact.contains("lazzaro") ||
+                compact.contains("lazarro") ||
+                compact.contains("hazaro")
+            val hasWake = compact.contains("despierta") ||
+                compact.contains("despiertate") ||
+                compact.contains("despertar")
+            return hasLazaro && hasWake
+        }
+
+        if (WakeWordDetector.containsWakeWord(text)) return true
 
         return compact.contains("lazaro") ||
             compact.contains("lasaro") ||
