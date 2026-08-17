@@ -21,7 +21,9 @@ import io.lazaro.memory.entity.MemoryEntry
 import io.lazaro.messaging.MessageRepository
 import io.lazaro.messaging.NotificationAccessHelper
 import io.lazaro.messaging.entity.IncomingMessage
+import io.lazaro.routes.editor.RouteImportService
 import kotlinx.coroutines.flow.MutableStateFlow
+import android.net.Uri
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -73,6 +75,7 @@ class MemoryManagementViewModel @Inject constructor(
     private val piHubBleManager: PiHubBleManager,
     private val piHubRepository: PiHubRepository,
     private val pathGuideRepository: PathGuideRepository,
+    private val routeImportService: RouteImportService,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MemoryManagementUiState())
@@ -129,6 +132,25 @@ class MemoryManagementViewModel @Inject constructor(
                 } else {
                     "Modo arnés desactivado"
                 },
+            )
+        }
+    }
+
+    fun importRouteFromUri(uri: Uri) {
+        viewModelScope.launch {
+            val result = routeImportService.importFromUri(uri)
+            _uiState.value = _uiState.value.copy(
+                statusMessage = result.fold(
+                    onSuccess = { r ->
+                        val verb = if (r.replaced) "actualizada" else "importada"
+                        "Ruta ${r.name} $verb. " +
+                            "${r.announcementCount} anuncios, ${r.crossingCount} cruces. " +
+                            "Di llévame a ${r.name} para usarla."
+                    },
+                    onFailure = { e ->
+                        "No pude importar la ruta: ${e.message ?: "archivo inválido"}"
+                    },
+                ),
             )
         }
     }

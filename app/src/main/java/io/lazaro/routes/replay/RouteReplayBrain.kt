@@ -19,6 +19,7 @@ import kotlin.math.max
 class RouteReplayBrain @Inject constructor(
     private val routeMapMatcher: RouteMapMatcher,
     private val ojenOdmBundle: OjenOdmBundle,
+    private val routeAnnouncementEngine: io.lazaro.routes.editor.RouteAnnouncementEngine,
 ) {
     private val beepStabilizer = BeepSignalStabilizer()
     private var lastDriftCueMs = 0L
@@ -41,10 +42,12 @@ class RouteReplayBrain @Inject constructor(
         lastNodeCueMs = 0L
         lastMatch = null
         routeMapMatcher.reset()
+        routeAnnouncementEngine.reset()
     }
 
     suspend fun loadRoute(routeId: Long) {
         routeMapMatcher.loadRoute(routeId)
+        routeAnnouncementEngine.loadRoute(routeId)
     }
 
     fun update(
@@ -73,7 +76,8 @@ class RouteReplayBrain @Inject constructor(
         }
 
         val expected = match.expectedPoint
-        val voiceCue = buildVoiceCue(match, yawDeg, now)
+        val editorCue = routeAnnouncementEngine.maybeCue(lat, lng, now)
+        val voiceCue = editorCue ?: buildVoiceCue(match, yawDeg, now)
         val (leftBeep, rightBeep, warning) = buildBeeps(match, corridor)
 
         return ExitBrainFrameResult(

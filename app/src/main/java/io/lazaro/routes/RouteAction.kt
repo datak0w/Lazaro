@@ -34,6 +34,11 @@ class RouteAction @Inject constructor(
             RouteIntent.LIST_ROUTES -> listRoutes()
             RouteIntent.DELETE_ROUTE -> prepareDelete(userText)
             RouteIntent.ROUTE_DETAILS -> routeDetails(userText)
+            RouteIntent.IMPORT_ROUTE -> ActionResult.Success(
+                "Para importar una ruta del editor web: en Memoria pulsa Importar ruta, " +
+                    "o comparte el archivo .lazaro-route.json con Lazaro. " +
+                    "El editor está en la web del manual, sección Editor de rutas.",
+            )
         }
     }
 

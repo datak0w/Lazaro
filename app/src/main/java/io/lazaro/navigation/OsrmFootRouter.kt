@@ -139,8 +139,21 @@ class OsrmFootRouter @Inject constructor() {
     fun actionForStep(step: OsrmStep): BlindNavigationPhraseBuilder.Action {
         val mod = step.modifier?.lowercase().orEmpty()
         val type = step.maneuverType.lowercase()
+        val nameBlob = buildString {
+            append(step.name.orEmpty().lowercase())
+            append(' ')
+            append(mod)
+            append(' ')
+            append(type)
+        }
+        val looksCross = nameBlob.contains("cruz") ||
+            nameBlob.contains("crosswalk") ||
+            nameBlob.contains("crossing") ||
+            nameBlob.contains("paso de cebra") ||
+            type == "notification" && nameBlob.contains("cross")
         return when {
             type == "arrive" -> BlindNavigationPhraseBuilder.Action.ARRIVE
+            looksCross -> BlindNavigationPhraseBuilder.Action.CROSS
             type == "depart" || type == "continue" || type == "new name" ->
                 BlindNavigationPhraseBuilder.Action.FORWARD
             type.contains("roundabout") -> when {

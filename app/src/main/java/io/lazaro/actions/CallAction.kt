@@ -4,10 +4,14 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.telecom.TelecomManager
+import android.telephony.TelephonyManager
+import android.util.Log
+import android.view.KeyEvent
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.lazaro.contacts.ContactMatch
@@ -26,8 +30,8 @@ class CallAction @Inject constructor(
             return ActionResult.Error("¿A quién quieres llamar?")
         }
 
-        val matches = contactResolver.findContacts(contactQuery)
-        if (matches.isEmpty()) {
+        val scored = contactResolver.findScoredContacts(contactQuery)
+        if (scored.isEmpty()) {
             val digits = contactResolver.normalizePhone(contactQuery)
             if (digits.filter { it.isDigit() }.length >= 9) {
                 return buildCallConfirmation(
@@ -37,19 +41,24 @@ class CallAction @Inject constructor(
             return ActionResult.Error("No encuentro a $contactQuery en tus contactos ni en memoria.")
         }
 
-        if (matches.size == 1) {
-            return buildCallConfirmation(matches.first())
+        val top = scored.first()
+        val second = scored.getOrNull(1)
+        val clearWinner = second == null ||
+            top.score >= second.score + ContactResolver.CLEAR_WIN_MARGIN
+
+        if (scored.size == 1 || clearWinner) {
+            return buildCallConfirmation(top.match)
         }
 
-        val options = matches.take(5).mapIndexed { index, match ->
-            "${index + 1}: ${match.displayName}"
+        val options = scored.take(5).mapIndexed { index, item ->
+            "${index + 1}: ${item.match.displayName}"
         }.joinToString(". ")
         return ActionResult.NeedsConfirmation(
-            prompt = "Encontré ${matches.size} contactos: $options. Di el número o el nombre completo.",
+            prompt = "Encontré varias personas parecidas a $contactQuery: $options. Di el número o el nombre completo.",
             pendingAction = PendingAction(
                 toolName = "select_contact_call",
-                args = matches.take(5).mapIndexed { index, m ->
-                    "candidate_$index" to "${m.displayName}|${m.phoneNumber}"
+                args = scored.take(5).mapIndexed { index, item ->
+                    "candidate_$index" to "${item.match.displayName}|${item.match.phoneNumber}"
                 }.toMap() + ("query" to contactQuery),
             ),
         )
@@ -69,6 +78,11 @@ class CallAction @Inject constructor(
         }
 
         return contactResolver.findSingleOrNull(selection)
+            ?: candidates.maxByOrNull {
+                ContactResolver.matchScore(selection, it.displayName)
+            }?.takeIf {
+                ContactResolver.matchScore(selection, it.displayName) >= ContactResolver.MIN_SCORE
+            }
             ?: contactResolver.findContacts(args["query"].orEmpty()).find {
                 it.displayName.equals(selection, ignoreCase = true)
             }
@@ -122,7 +136,7 @@ class CallAction @Inject constructor(
     fun prepareIncomingAnswer(displayName: String, phoneNumber: String): ActionResult {
         val label = displayName.ifBlank { "número desconocido" }
         return ActionResult.NeedsConfirmation(
-            prompt = "LLAMADA. $label. Di responde, sí o cógelo.",
+            prompt = "LLAMADA. $label. ¿Respondo? Di sí o no.",
             pendingAction = PendingAction(
                 toolName = TOOL_ANSWER_INCOMING,
                 args = mapOf(
@@ -140,66 +154,181 @@ class CallAction @Inject constructor(
             )
         }
         return try {
-            val telecom = context.getSystemService(TelecomManager::class.java)
-                ?: return ActionResult.Error("No puedo acceder al teléfono.")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                telecom.acceptRingingCall()
-            } else {
-                return ActionResult.Error("Este Android no permite responder desde Lázaro.")
+            val ok = acceptRingingWithFallbacks()
+            if (!ok) {
+                restoreNormalAudio()
+                return ActionResult.Error(
+                    "No pude coger la llamada. Prueba otra vez o cógela en el teléfono.",
+                )
             }
+            // No seguir escuchando: el micrófono es para la llamada.
             ActionResult.Success(
-                "Respondiendo. Durante la llamada di Lázaro cuelga para colgar.",
+                "Respondiendo. Di Lázaro cuelga para colgar, o botón cancelar del bastón.",
+                suspendListening = true,
             )
         } catch (e: SecurityException) {
+            restoreNormalAudio()
             ActionResult.Error("Sin permiso para responder. Activa «Responder llamadas» para Lázaro.")
         } catch (e: Exception) {
+            restoreNormalAudio()
             ActionResult.Error("No pude responder: ${e.message}")
         }
     }
 
     fun rejectIncomingCall(): ActionResult {
-        if (!hasAnswerPermission()) {
-            return ActionResult.Success("Vale, no respondo. Recházala en el teléfono si quieres.")
-        }
         return try {
-            val telecom = context.getSystemService(TelecomManager::class.java)
-                ?: return ActionResult.Success("Vale, no respondo.")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                telecom.endCall()
-            }
-            ActionResult.Success("Rechazada.")
+            val ok = endCallWithFallbacks()
+            restoreNormalAudio()
+            if (ok) ActionResult.Success("Llamada rechazada.")
+            else ActionResult.Success("Vale, no respondo. Recházala en el teléfono si sigue sonando.")
         } catch (_: SecurityException) {
-            ActionResult.Success("Vale, no respondo.")
+            restoreNormalAudio()
+            ActionResult.Success("Vale, no respondo. Recházala en el teléfono.")
         } catch (_: Exception) {
+            restoreNormalAudio()
             ActionResult.Success("Vale, no respondo.")
         }
     }
 
-    /** Cuelga la llamada activa (o rechaza si aún suena). */
+    /** Cuelga la llamada activa o rechaza si aún suena. */
     fun hangUpActiveCall(): ActionResult {
-        if (!hasAnswerPermission()) {
-            return ActionResult.Error(
-                "Necesito permiso para colgar. Activa «Responder llamadas» para Lázaro en ajustes.",
-            )
+        if (!hasAnswerPermission() && !hasCallPermission()) {
+            return if (telephonyCallState() != TelephonyManager.CALL_STATE_IDLE && sendHeadsetHook()) {
+                restoreNormalAudio()
+                ActionResult.Success("Llamada colgada.")
+            } else {
+                restoreNormalAudio()
+                ActionResult.Error(
+                    "Necesito permiso para colgar. Activa «Responder llamadas» para Lázaro en ajustes.",
+                )
+            }
         }
         return try {
-            val telecom = context.getSystemService(TelecomManager::class.java)
-                ?: return ActionResult.Error("No puedo acceder al teléfono.")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val ended = telecom.endCall()
-                if (ended) ActionResult.Success("Llamada colgada.")
-                else ActionResult.Success("He pedido colgar la llamada.")
-            } else {
-                ActionResult.Error("Este Android no permite colgar desde Lázaro.")
-            }
+            val ok = endCallWithFallbacks()
+            restoreNormalAudio()
+            if (ok) ActionResult.Success("Llamada colgada.")
+            else ActionResult.Success(
+                "He pedido colgar. Si sigue, cuelga en el teléfono o con el botón cancelar del bastón.",
+            )
         } catch (e: SecurityException) {
-            ActionResult.Error("Sin permiso para colgar. Activa el permiso de teléfono para Lázaro.")
+            val hooked = telephonyCallState() != TelephonyManager.CALL_STATE_IDLE && sendHeadsetHook()
+            restoreNormalAudio()
+            if (hooked) ActionResult.Success("Llamada colgada.")
+            else ActionResult.Error("Sin permiso para colgar. Activa el permiso de teléfono para Lázaro.")
         } catch (e: Exception) {
+            restoreNormalAudio()
             ActionResult.Error("No pude colgar: ${e.message}")
         }
     }
 
     fun requestCallConfirmation(contact: ContactMatch): ActionResult = buildCallConfirmation(contact)
+
+    /**
+     * Tras contestar/colgar fallido o idle: el MODE_IN_CALL deja el TTS inaudible
+     * (sale por auricular). Hay que volver a MODE_NORMAL.
+     */
+    fun restoreNormalAudio() {
+        try {
+            val audio = context.getSystemService(AudioManager::class.java) ?: return
+            if (audio.mode != AudioManager.MODE_NORMAL) {
+                audio.mode = AudioManager.MODE_NORMAL
+                Log.i(TAG, "AudioManager mode → NORMAL")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "restoreNormalAudio: ${e.message}")
+        }
+    }
+
+    private fun acceptRingingWithFallbacks(): Boolean {
+        val state = telephonyCallState()
+        if (state != TelephonyManager.CALL_STATE_RINGING) {
+            Log.w(TAG, "accept: no hay RINGING (state=$state); no envío headset hook")
+            return false
+        }
+        var accepted = false
+        val telecom = context.getSystemService(TelecomManager::class.java)
+        if (telecom != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && hasAnswerPermission()) {
+            try {
+                telecom.acceptRingingCall()
+                accepted = true
+                Log.i(TAG, "acceptRingingCall OK")
+            } catch (e: Exception) {
+                Log.w(TAG, "acceptRingingCall falló: ${e.message}")
+            }
+        }
+        // Solo hook si aún suena (evita play/pause de media y MODE_IN_CALL fantasma).
+        if (telephonyCallState() == TelephonyManager.CALL_STATE_RINGING) {
+            val hook = sendHeadsetHook()
+            return accepted || hook
+        }
+        return accepted || telephonyCallState() == TelephonyManager.CALL_STATE_OFFHOOK
+    }
+
+    private fun endCallWithFallbacks(): Boolean {
+        val state = telephonyCallState()
+        if (state == TelephonyManager.CALL_STATE_IDLE) {
+            Log.i(TAG, "endCall: ya IDLE, no hook")
+            return true
+        }
+        var ended = false
+        val telecom = context.getSystemService(TelecomManager::class.java)
+        if (telecom != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && hasAnswerPermission()) {
+            try {
+                ended = telecom.endCall()
+                Log.i(TAG, "endCall → $ended")
+            } catch (e: Exception) {
+                Log.w(TAG, "endCall falló: ${e.message}")
+            }
+        }
+        if (ended || telephonyCallState() == TelephonyManager.CALL_STATE_IDLE) return true
+        return sendHeadsetHook()
+    }
+
+    private fun telephonyCallState(): Int {
+        return try {
+            val tm = context.getSystemService(TelephonyManager::class.java)
+            tm?.callState ?: TelephonyManager.CALL_STATE_IDLE
+        } catch (_: Exception) {
+            TelephonyManager.CALL_STATE_IDLE
+        }
+    }
+
+    /**
+     * Simula el botón del auricular: en muchos Samsung contesta o cuelga.
+     * Solo usar si hay llamada real (RINGING/OFFHOOK).
+     */
+    private fun sendHeadsetHook(): Boolean {
+        return try {
+            val audio = context.getSystemService(AudioManager::class.java)
+            if (audio != null) {
+                val down = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_HEADSETHOOK)
+                val up = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_HEADSETHOOK)
+                audio.dispatchMediaKeyEvent(down)
+                audio.dispatchMediaKeyEvent(up)
+                Log.i(TAG, "headset hook via AudioManager")
+                return true
+            }
+            val downIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                putExtra(
+                    Intent.EXTRA_KEY_EVENT,
+                    KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_HEADSETHOOK),
+                )
+            }
+            val upIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                putExtra(
+                    Intent.EXTRA_KEY_EVENT,
+                    KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_HEADSETHOOK),
+                )
+            }
+            context.sendOrderedBroadcast(downIntent, null)
+            context.sendOrderedBroadcast(upIntent, null)
+            Log.i(TAG, "headset hook via broadcast")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "headset hook falló: ${e.message}")
+            false
+        }
+    }
 
     private fun buildCallConfirmation(contact: ContactMatch): ActionResult {
         val spokenPhone = contactResolver.formatPhoneForSpeech(contact.phoneNumber)
@@ -230,6 +359,7 @@ class CallAction @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "CallAction"
         const val TOOL_ANSWER_INCOMING = "answer_incoming_call"
     }
 }

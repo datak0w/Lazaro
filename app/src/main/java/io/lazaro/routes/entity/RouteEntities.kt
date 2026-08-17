@@ -19,6 +19,8 @@ data class SavedRoute(
     val runCount: Int = 0,
     val qualityScore: Float = 0f,
     val totalLengthM: Float = 0f,
+    /** Documento completo del editor web (anuncios, cruces, aceras). */
+    val editorDocumentJson: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
 )

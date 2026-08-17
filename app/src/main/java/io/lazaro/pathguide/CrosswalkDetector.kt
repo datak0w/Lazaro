@@ -63,10 +63,45 @@ class CrosswalkDetector {
             0f
         }
 
+        val midX = (roiLeft + roiRight) / 2
+        var leftStripes = 0
+        var rightStripes = 0
+        var y2 = roiTop
+        while (y2 < roiBottom) {
+            var leftT = 0
+            var rightT = 0
+            var prevL = false
+            var prevR = false
+            var x = roiLeft
+            while (x < roiRight) {
+                val idx = y2 * width + x
+                if (idx >= gray.size) break
+                val dark = gray[idx].toInt() and 0xFF < 110
+                if (x < midX) {
+                    if (x > roiLeft && dark != prevL) leftT++
+                    prevL = dark
+                } else {
+                    if (dark != prevR) rightT++
+                    prevR = dark
+                }
+                x += 4
+            }
+            if (leftT >= 3) leftStripes++
+            if (rightT >= 3) rightStripes++
+            y2 += 6
+        }
+        val lateralBias = when {
+            !latched -> 0f
+            leftStripes > rightStripes + 2 -> -0.7f
+            rightStripes > leftStripes + 2 -> 0.7f
+            else -> 0f
+        }
+
         return CrosswalkState(
             detected = latched,
             confidence = confidence,
             distanceMeters = distanceMeters,
+            lateralBias = lateralBias,
         )
     }
 

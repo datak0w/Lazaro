@@ -49,13 +49,122 @@ object BlindNavigationPhraseBuilder {
 
     /** Tip principal que deben oír siempre (una frase, acción clara). */
     fun primaryTip(action: Action): String = when (action) {
-        Action.FORWARD -> "Camina hacia adelante."
+        Action.FORWARD -> "Continúa hacia adelante."
         Action.TURN_LEFT -> "Gira a la izquierda."
         Action.TURN_RIGHT -> "Gira a la derecha."
         Action.U_TURN -> "Da la vuelta."
-        Action.CROSS -> "Cruza la calle con cuidado."
+        Action.CROSS -> "Ahora tienes que cruzar. Cruza con cuidado."
         Action.ARRIVE -> "Has llegado a tu destino."
-        Action.OTHER -> "Sigue la indicación de Maps."
+        Action.OTHER -> "Sigue la indicación."
+    }
+
+    /** Refuerzo periódico en tramos largos rectos (variar para no aburrir). */
+    fun announceContinueStraight(
+        metersToNextManeuver: Int?,
+        streetName: String? = null,
+        variation: Int = 0,
+    ): String {
+        val street = streetName?.trim()?.takeIf { it.length >= 2 }
+        val ahead = metersToNextManeuver?.takeIf { it in 20..400 }
+        val base = when ((variation % 4 + 4) % 4) {
+            1 -> "Sigue recto."
+            2 -> "Mantén el rumbo. Continúa hacia adelante."
+            3 -> "Todo bien. Sigue caminando hacia adelante."
+            else -> "Continúa hacia adelante."
+        }
+        return buildString {
+            append(base)
+            if (street != null) append(" Por $street.")
+            if (ahead != null && ahead >= 40) {
+                append(" El próximo cambio es en unos ${roundMeters(ahead)} metros.")
+            }
+        }.trim()
+    }
+
+    /** Corrección de rumbo cuando el teléfono no apunta al tramo. */
+    fun announceHeadingCorrection(action: Action): String? = when (action) {
+        Action.TURN_LEFT -> "Corrige: gira un poco a la izquierda y sigue."
+        Action.TURN_RIGHT -> "Corrige: gira un poco a la derecha y sigue."
+        Action.U_TURN -> "Vas en sentido contrario. Da la vuelta."
+        else -> null
+    }
+
+    /** Cambio de calle al entrar en un tramo nuevo. */
+    fun announceStreetChange(streetName: String): String {
+        val street = streetName.trim()
+        return "Entras en $street. Continúa hacia adelante."
+    }
+
+    /** Tras completar un giro. */
+    fun announceAfterTurn(): String = "Perfecto. Ahora continúa hacia adelante."
+
+    /** Anticipa el próximo giro OSRM a N metros (opcionalmente a calle). */
+    fun announceNextManeuver(
+        action: Action,
+        distanceM: Int,
+        streetName: String? = null,
+    ): String {
+        val dist = distanceM.coerceIn(5, 500)
+        val verb = when (action) {
+            Action.TURN_LEFT -> "gira a la izquierda"
+            Action.TURN_RIGHT -> "gira a la derecha"
+            Action.U_TURN -> "da la vuelta"
+            Action.CROSS -> "tienes que cruzar"
+            Action.ARRIVE -> "llegas a tu destino"
+            Action.FORWARD -> "sigue recto"
+            Action.OTHER -> "prepárate para el siguiente paso"
+        }
+        val street = streetName?.trim()?.takeIf { it.length >= 2 }
+        val toward = if (street != null && action != Action.ARRIVE && action != Action.CROSS) {
+            " hacia $street"
+        } else {
+            ""
+        }
+        return when {
+            dist <= 12 -> when (action) {
+                Action.CROSS -> "Ahora, cruza la calle$toward."
+                else -> "Ahora, $verb$toward."
+            }
+            dist <= 25 -> "En unos $dist metros, $verb$toward."
+            dist <= 60 -> "Prepárate: en unos $dist metros, $verb$toward."
+            else -> "Más adelante, en unos ${roundMeters(dist)} metros, $verb$toward."
+        }
+    }
+
+    fun announceCrossingAhead(
+        distanceM: Int,
+        side: CrossingSide = CrossingSide.AHEAD,
+    ): String {
+        val d = distanceM.coerceIn(5, 120)
+        val where = when (side) {
+            CrossingSide.LEFT -> "a tu izquierda"
+            CrossingSide.RIGHT -> "a tu derecha"
+            CrossingSide.AHEAD -> "delante"
+        }
+        return when {
+            d <= 15 && side != CrossingSide.AHEAD ->
+                "Paso de cebra $where. Ahora tienes que cruzar."
+            d <= 15 ->
+                "Paso de cebra delante. Ahora tienes que cruzar."
+            d <= 35 ->
+                "Paso de cebra $where a unos $d metros. Prepárate para cruzar."
+            else ->
+                "Hay un cruce peatonal $where a unos $d metros."
+        }
+    }
+
+    enum class CrossingSide {
+        LEFT,
+        RIGHT,
+        AHEAD,
+    }
+
+    private fun roundMeters(meters: Int): Int {
+        return when {
+            meters <= 30 -> meters
+            meters <= 100 -> (meters / 5) * 5
+            else -> (meters / 10) * 10
+        }
     }
 
     /** Primera indicación propia al arrancar (Maps aún no ha hablado). */
@@ -103,31 +212,6 @@ object BlindNavigationPhraseBuilder {
         return parts.joinToString(" ").trim()
     }
 
-    /** Anticipa el próximo giro OSRM a N metros (opcionalmente a calle). */
-    fun announceNextManeuver(
-        action: Action,
-        distanceM: Int,
-        streetName: String? = null,
-    ): String {
-        val dist = distanceM.coerceIn(5, 400)
-        val verb = when (action) {
-            Action.TURN_LEFT -> "gira a la izquierda"
-            Action.TURN_RIGHT -> "gira a la derecha"
-            Action.U_TURN -> "da la vuelta"
-            Action.CROSS -> "cruza la calle"
-            Action.ARRIVE -> "llegas a tu destino"
-            Action.FORWARD -> "sigue recto"
-            Action.OTHER -> "sigue la indicación"
-        }
-        val street = streetName?.trim()?.takeIf { it.length >= 2 }
-        val toward = if (street != null && action != Action.ARRIVE) " a $street" else ""
-        return when {
-            dist <= 15 -> "Ahora, $verb$toward."
-            dist <= 35 -> "En unos $dist metros, $verb$toward."
-            else -> "En unos $dist metros, $verb$toward."
-        }
-    }
-
     /** Hito de distancia restante al destino (con ETA opcional). */
     fun announceDistanceMilestone(
         metersLeft: Int,
@@ -146,15 +230,6 @@ object BlindNavigationPhraseBuilder {
 
     fun announceOffRouteRecalc(): String =
         "Te saliste de la ruta. Recalculando."
-
-    fun announceCrossingAhead(distanceM: Int): String {
-        val d = distanceM.coerceIn(5, 120)
-        return if (d <= 20) {
-            "Cruce peatonal cerca. Cruza con cuidado."
-        } else {
-            "Cruce peatonal a unos $d metros."
-        }
-    }
 
     /** Sin brújula/GPS bearing: pedir calibración al caminar. */
     fun announceCalibrateHeading(label: String): String {
@@ -228,7 +303,7 @@ object BlindNavigationPhraseBuilder {
     /** Tip al caminar recto con acera detectada. */
     fun walkingStraightTip(layout: StreetLayoutState?, frontalBlocked: Boolean): String? {
         if (frontalBlocked) return null
-        return "Camina hacia adelante."
+        return "Continúa hacia adelante."
     }
 
     private fun distanceHint(instruction: String): String? {

@@ -14,6 +14,7 @@ import io.lazaro.routes.location.HighAccuracyLocationProvider
 import io.lazaro.routes.map.OjenMapBundle
 import io.lazaro.routes.map.OjenOdmBundle
 import io.lazaro.routes.model.RouteCodec
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +40,7 @@ class RouteRecorderController @Inject constructor(
     private var pendingName: String? = null
     private var pendingDestinationKey: String? = null
     private var passiveLearn = false
+    private var createdNewRoute = false
 
     fun isRecording(): Boolean = activeRunId != null && !passiveLearn
 
@@ -57,8 +59,9 @@ class RouteRecorderController @Inject constructor(
         pendingName = routeRepository.getRoute(routeId)?.name
         pendingDestinationKey = null
         passiveLearn = true
+        createdNewRoute = false
         routeRecordingSampler.start(runId)
-        routeRecordingSampler.bindGps(scope, highAccuracyLocationProvider.fixes())
+        seedAndBindGps()
     }
 
     /**
@@ -137,6 +140,32 @@ class RouteRecorderController @Inject constructor(
         pendingName = null
         pendingDestinationKey = null
         passiveLearn = false
+        createdNewRoute = false
+    }
+
+    private suspend fun abortStart(routeId: Long, runId: Long, reason: String): ActionResult {
+        Log.w(TAG, "Abortando grabación: $reason")
+        routeRecordingSampler.stop()
+        try {
+            routeRepository.abandonRun(runId)
+        } catch (_: Exception) {
+        }
+        if (createdNewRoute) {
+            try {
+                routeRepository.deleteRoute(routeId)
+            } catch (_: Exception) {
+            }
+        }
+        clearActive()
+        return ActionResult.Error(reason)
+    }
+
+    private suspend fun seedAndBindGps() {
+        // Semilla: último fix conocido para no perder los primeros metros sin GPS.
+        highAccuracyLocationProvider.lastFix()?.let { fix ->
+            routeRecordingSampler.seedGps(fix)
+        }
+        routeRecordingSampler.bindGps(scope, highAccuracyLocationProvider.fixes(intervalMs = 800L))
     }
 
     suspend fun startRecording(
@@ -146,6 +175,17 @@ class RouteRecorderController @Inject constructor(
     ): ActionResult {
         if (isRecording()) {
             return ActionResult.Error("Ya hay una grabación en curso. Di para de grabar primero.")
+        }
+        // Si había aprendizaje pasivo, cerrarlo limpio antes de grabar.
+        if (passiveLearn && activeRunId != null) {
+            routeRecordingSampler.stop()
+            activeRunId?.let { runId ->
+                try {
+                    routeRepository.abandonRun(runId)
+                } catch (_: Exception) {
+                }
+            }
+            clearActive()
         }
 
         ojenMapBundle.ensureLoaded()
@@ -158,6 +198,7 @@ class RouteRecorderController @Inject constructor(
                 ?: return ActionResult.Error("No encuentro esa ruta para aprender más.")
             routeId = existing.id
             displayName = existing.name
+            createdNewRoute = false
         } else {
             val routes = routeRepository.getAllRoutes()
             if (routes.size >= RouteRepository.MAX_ROUTES) {
@@ -170,6 +211,7 @@ class RouteRecorderController @Inject constructor(
                 ),
             )
             displayName = name
+            createdNewRoute = true
         }
 
         val runId = routeRepository.startRun(routeId)
@@ -177,15 +219,23 @@ class RouteRecorderController @Inject constructor(
         activeRunId = runId
         pendingName = displayName
         pendingDestinationKey = destinationKey
+        passiveLearn = false
 
         routeRecordingSampler.start(runId)
-        routeRecordingSampler.bindGps(scope, highAccuracyLocationProvider.fixes())
+        seedAndBindGps()
 
-        val started = pathGuideController.start(PathGuideMode.GRABANDO)
+        val started = try {
+            pathGuideController.start(PathGuideMode.GRABANDO)
+        } catch (e: Exception) {
+            Log.e(TAG, "Excepción al iniciar PathGuide GRABANDO", e)
+            false
+        }
         if (!started) {
-            activeRouteId = null
-            activeRunId = null
-            return ActionResult.Error("No pude activar la cámara para grabar la ruta.")
+            return abortStart(
+                routeId,
+                runId,
+                "No pude activar la cámara para grabar. Comprueba el permiso de cámara y vuelve a decir graba ruta.",
+            )
         }
 
         val learnMsg = if (existingRouteId != null) {
@@ -287,6 +337,8 @@ class RouteRecorderController @Inject constructor(
         obstacleLabel: String?,
         lat: Double,
         lng: Double,
+        accuracyM: Float = 12f,
+        bearingDeg: Float = 0f,
         phase: String = if (passiveLearn) "REPLAY_LEARN" else "RECORDING",
     ) {
         if (!isCapturingSamples()) return
@@ -305,6 +357,10 @@ class RouteRecorderController @Inject constructor(
             segmentType = segmentType,
             obstacleLabel = obstacleLabel,
             phase = phase,
+            fallbackLat = lat,
+            fallbackLng = lng,
+            fallbackAccuracyM = accuracyM,
+            fallbackBearingDeg = bearingDeg,
         )
     }
 
@@ -319,6 +375,7 @@ class RouteRecorderController @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "RouteRecorder"
         private const val MIN_PASSIVE_SAMPLES = 20
     }
 }

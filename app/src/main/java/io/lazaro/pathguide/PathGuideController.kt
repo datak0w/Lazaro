@@ -230,9 +230,11 @@ class PathGuideController @Inject constructor(
             config = config.copy(harnessMountMode = true, depthEnhancedGuidance = true)
         }
         val harnessActive = config.harnessMountMode || autoHarness
-        // Navegación/ruta: preferir monocular fiable salvo que profundidad ya esté activa.
+        // Grabar ruta: siempre CameraX monocular (ARCore suele fallar al arrancar y aborta la grabación).
+        // Navegación/ruta: monocular salvo profundidad explícita.
         val depthWanted = when (mode) {
-            PathGuideMode.PASEO, PathGuideMode.DEBUG, PathGuideMode.GRABANDO ->
+            PathGuideMode.GRABANDO -> false
+            PathGuideMode.PASEO, PathGuideMode.DEBUG ->
                 config.depthEnhancedGuidance || harnessActive
             PathGuideMode.NAVEGACION, PathGuideMode.RUTA ->
                 config.depthEnhancedGuidance && !autoHarness
@@ -842,6 +844,8 @@ class PathGuideController @Inject constructor(
             obstacleLabel = obstacle,
             lat = fix.lat,
             lng = fix.lng,
+            accuracyM = fix.accuracyM,
+            bearingDeg = fix.bearingDeg,
         )
         if (now - lastRouteFlushMs >= RECORDING_FLUSH_MS) {
             lastRouteFlushMs = now
@@ -870,6 +874,8 @@ class PathGuideController @Inject constructor(
             obstacleLabel = obstacle,
             lat = fix.lat,
             lng = fix.lng,
+            accuracyM = fix.accuracyM,
+            bearingDeg = fix.bearingDeg,
             phase = "REPLAY_LEARN",
         )
         if (now - lastRouteFlushMs >= RECORDING_FLUSH_MS) {

@@ -112,6 +112,8 @@ class AssistantController @Inject constructor(
     private var navigationPauseJob: Job? = null
     private var conversationWindowJob: Job? = null
     private var listeningSuspended = false
+    /** Tras contestar: no reabrir STT; wake pasivo para «Lázaro cuelga». */
+    private var callMicSuspended = false
     private var voiceCaptureInProgress = false
     private var lastStateChangeMs = System.currentTimeMillis()
     private var lastWakeHandledMs = 0L
@@ -134,11 +136,23 @@ class AssistantController @Inject constructor(
         scope.launch {
             incomingCallMonitor.lifecycle.collect { event ->
                 when (event) {
-                    CallLifecycleEvent.OFFHOOK,
-                    CallLifecycleEvent.IDLE,
-                    -> {
+                    CallLifecycleEvent.OFFHOOK -> {
+                        // Contestada: quitar confirmación sí/no si seguía pendiente.
                         actionExecutor.clearIncomingCallPending()
                         conversationContext.clearPending()
+                    }
+                    CallLifecycleEvent.IDLE -> {
+                        actionExecutor.clearIncomingCallPending()
+                        conversationContext.clearPending()
+                        actionExecutor.restoreCallAudioRouting()
+                        // Tras colgar: reanudar standby (mic libre otra vez).
+                        if (callMicSuspended) {
+                            endCallMicSuspend()
+                            if (isActive && !isSpeaking && !sleepModeController.isSleeping()) {
+                                restoreWakeWordPassive()
+                                returnToStandby(delayMs = 0L)
+                            }
+                        }
                     }
                     CallLifecycleEvent.RINGING -> Unit
                 }
@@ -176,11 +190,14 @@ class AssistantController @Inject constructor(
     fun startAssistant() {
         if (isActive) return
         isActive = true
+        listeningSuspended = false
+        callMicSuspended = false
         resetCounters()
         listenProfile = ListeningProfile.STANDBY
         startWatchdog()
         caneBleManager.setSleepBlocked(false)
         incomingCallMonitor.start()
+        actionExecutor.restoreCallAudioRouting()
         caneLowBatteryMonitor.start { _uiState.value.voiceState }
         scope?.launch {
             // Hidratar y marcar sleep ANTES de arrancar Vosk: si no, «Lázaro» abre STT en dormir.
@@ -213,6 +230,7 @@ class AssistantController @Inject constructor(
     fun stopAssistant(clearWantedFlag: Boolean = false) {
         isActive = false
         listeningSuspended = false
+        callMicSuspended = false
         navigationPauseJob?.cancel()
         conversationWindowJob?.cancel()
         softWaitToneEngine.stop()
@@ -247,7 +265,17 @@ class AssistantController @Inject constructor(
             scope?.launch { finishVoiceNoteFromCane() }
             return
         }
+        // Durante llamada activa no abrir STT (compite con el teléfono).
+        if (incomingCallMonitor.isInActiveCall()) {
+            enterCallMicSuspend()
+            scope?.launch {
+                speakOnly("En llamada. Di Lázaro cuelga, o botón cancelar del bastón.")
+            }
+            return
+        }
         listeningSuspended = false
+        callMicSuspended = false
+        actionExecutor.restoreCallAudioRouting()
         navigationPauseJob?.cancel()
         processingJob?.cancel()
         processingJob = null
@@ -283,6 +311,7 @@ class AssistantController @Inject constructor(
                 exitSleepMode()
             }
             listeningSuspended = false
+            callMicSuspended = false
             navigationPauseJob?.cancel()
             processingJob?.cancel()
             processingJob = null
@@ -463,14 +492,53 @@ class AssistantController @Inject constructor(
 
     private fun cancelFromCane() {
         if (!isActive) return
-        listeningSuspended = false
         navigationPauseJob?.cancel()
         forceStopOutput()
         resetCounters()
         scope?.launch {
+            // Bastón CANCEL: rechazar si suena / pending; colgar si hay llamada activa.
+            when (val hangup = actionExecutor.tryHandleHangupIntent("cuelga")) {
+                is ActionResult.Success -> {
+                    endCallMicSuspend()
+                    listeningSuspended = false
+                    conversationContext.clearPending()
+                    speakOnly(hangup.message)
+                    markState(VoiceState.Idle, "Listo.", awaitingTrigger = true)
+                    resumeListening(directAfter = false)
+                    return@launch
+                }
+                is ActionResult.Error -> {
+                    endCallMicSuspend()
+                    listeningSuspended = false
+                    conversationContext.clearPending()
+                    speakOnly(hangup.message)
+                    markState(VoiceState.Idle, "Listo.", awaitingTrigger = true)
+                    resumeListening(directAfter = false)
+                    return@launch
+                }
+                is ActionResult.NeedsConfirmation -> {
+                    speakOnly(hangup.prompt)
+                    resumePendingInput()
+                    return@launch
+                }
+                null -> Unit
+            }
+
+            listeningSuspended = false
             if (actionExecutor.hasPendingConfirmation()) {
-                actionExecutor.cancelPending()
+                val result = actionExecutor.cancelPending()
                 conversationContext.clearPending()
+                val msg = when (result) {
+                    is ActionResult.Success -> result.message
+                    is ActionResult.Error -> result.message
+                    is ActionResult.NeedsConfirmation -> result.prompt
+                }
+                mapsSessionCloser.closeMapsNavigation()
+                mapsSessionCloser.bringLazaroToFront()
+                speakOnly(msg)
+                markState(VoiceState.Idle, "Listo.", awaitingTrigger = true)
+                resumeListening(directAfter = false)
+                return@launch
             }
             val closingNav = navigationSessionManager.isNavigationActive() ||
                 activeSessionTracker.hasActiveSession()
@@ -661,6 +729,7 @@ class AssistantController @Inject constructor(
         }
 
         listeningSuspended = false
+        callMicSuspended = false
         navigationPauseJob?.cancel()
         softWaitToneEngine.stop()
         cancelScheduledListen()
@@ -699,6 +768,24 @@ class AssistantController @Inject constructor(
             voiceCaptureInProgress = false
             scope?.launch { dispatchCommand(spokenCommand) }
             return
+        }
+
+        // Durante llamada: no abrir Google STT (compite con el mic del teléfono).
+        // Solo comandos en la misma frase («Lázaro cuelga») o botón cancelar del bastón.
+        if (incomingCallMonitor.isInActiveCall()) {
+            pendingWakeCommand = ""
+            voiceCaptureInProgress = false
+            enterCallMicSuspend()
+            // Aviso corto: antes quedaba en silencio y parecía que Lázaro no hablaba.
+            scope?.launch {
+                speakOnly("En llamada. Di Lázaro cuelga, o botón cancelar del bastón.")
+            }
+            return
+        }
+        // Si el flag interno quedó colgado sin llamada real, recuperar voz/mic.
+        if (callMicSuspended) {
+            endCallMicSuspend()
+            actionExecutor.restoreCallAudioRouting()
         }
 
         pendingWakeCommand = ""
@@ -1140,12 +1227,16 @@ class AssistantController @Inject constructor(
             if (!completed) {
                 actionExecutor.cancelVoiceNoteRecording()
                 if (userAbortDuringSpeech.getAndSet(false)) {
-                    // «para» durante lectura (p. ej. WhatsApp): salir del pending y no reabrir escucha
+                    // «no» / «para» durante confirmación: cancelar pending y confirmar por voz
                     if (actionExecutor.hasPendingConfirmation()) {
-                        actionExecutor.cancelPending()
+                        val cancelled = actionExecutor.cancelPending()
                         conversationContext.clearPending()
+                        val msg = (cancelled as? ActionResult.Success)?.message
+                            ?: "Vale, cancelado."
+                        speakOnly(msg)
+                    } else {
+                        speakOnly("Vale, paro.")
                     }
-                    speakOnly("Vale, paro.")
                 }
                 restoreWakeWordPassive()
                 returnToStandby(delayMs = 0L)
@@ -1172,52 +1263,67 @@ class AssistantController @Inject constructor(
                 enterNavigationPause()
             } else if (reply.suspendListening) {
                 conversationWindowJob?.cancel()
-                val mapsOk = if (actionExecutor.hasDeferredMapsLaunch()) {
-                    actionExecutor.runDeferredMapsLaunch()
-                } else {
-                    true
-                }
-                val navAlready =
-                    navigationSessionManager.isNavigationActive() ||
-                        pathGuideController.currentMode() == PathGuideMode.NAVEGACION ||
-                        pathGuideController.currentMode() == PathGuideMode.RUTA
-                if (mapsOk || navAlready) {
-                    val label = extractNavigationLabel(text, spoken)
-                    val routeReplay = pathGuideController.currentMode() == PathGuideMode.RUTA
-                    if (!navigationSessionManager.isNavigationActive() ||
-                        !activeSessionTracker.hasActiveSession()
-                    ) {
-                        val navTarget = actionExecutor.consumePendingNavigationTarget()
-                            ?: NavigationTarget(label = label)
-                        navigationSessionManager.startSession(
-                            label = label,
-                            routeReplay = routeReplay,
-                            target = navTarget,
-                        )
+                // Contestar llamada: no reabrir STT ni arrancar navegación.
+                val answeredCall = spoken.contains("Respondiendo", ignoreCase = true)
+                if (answeredCall) {
+                    incomingCallMonitor.refreshFromTelephony()
+                    if (incomingCallMonitor.isCallSessionActive()) {
+                        enterCallMicSuspend()
                     } else {
-                        activeSessionTracker.updateLabel(label)
-                        activeSessionTracker.resumeFromChat()
+                        // Contestó «en vacío»: no dejar el audio/mic muertos.
+                        endCallMicSuspend()
+                        actionExecutor.restoreCallAudioRouting()
+                        restoreWakeWordPassive()
+                        returnToStandby(delayMs = 0L)
                     }
-                    scope?.launch {
-                        val mode = pathGuideController.currentMode()
-                        if (mode == PathGuideMode.RUTA) return@launch
-                        if (mode != PathGuideMode.NAVEGACION) {
-                            val camOk = pathGuideController.start(PathGuideMode.NAVEGACION)
-                            if (!camOk) {
-                                speakOnly(
-                                    "No pude abrir la cámara para guiarte. " +
-                                        "Comprueba el permiso de cámara e inténtalo otra vez.",
-                                )
+                } else {
+                    val mapsOk = if (actionExecutor.hasDeferredMapsLaunch()) {
+                        actionExecutor.runDeferredMapsLaunch()
+                    } else {
+                        true
+                    }
+                    val navAlready =
+                        navigationSessionManager.isNavigationActive() ||
+                            pathGuideController.currentMode() == PathGuideMode.NAVEGACION ||
+                            pathGuideController.currentMode() == PathGuideMode.RUTA
+                    if (mapsOk || navAlready) {
+                        val label = extractNavigationLabel(text, spoken)
+                        val routeReplay = pathGuideController.currentMode() == PathGuideMode.RUTA
+                        if (!navigationSessionManager.isNavigationActive() ||
+                            !activeSessionTracker.hasActiveSession()
+                        ) {
+                            val navTarget = actionExecutor.consumePendingNavigationTarget()
+                                ?: NavigationTarget(label = label)
+                            navigationSessionManager.startSession(
+                                label = label,
+                                routeReplay = routeReplay,
+                                target = navTarget,
+                            )
+                        } else {
+                            activeSessionTracker.updateLabel(label)
+                            activeSessionTracker.resumeFromChat()
+                        }
+                        scope?.launch {
+                            val mode = pathGuideController.currentMode()
+                            if (mode == PathGuideMode.RUTA) return@launch
+                            if (mode != PathGuideMode.NAVEGACION) {
+                                val camOk = pathGuideController.start(PathGuideMode.NAVEGACION)
+                                if (!camOk) {
+                                    speakOnly(
+                                        "No pude abrir la cámara para guiarte. " +
+                                            "Comprueba el permiso de cámara e inténtalo otra vez.",
+                                    )
+                                }
                             }
                         }
+                        enterNavigationPause()
+                    } else {
+                        speakOnly(
+                            "No pude iniciar la guía. Comprueba ubicación y cámara e inténtalo otra vez.",
+                        )
+                        openConversationWindow()
+                        resumeListening(directAfter = true)
                     }
-                    enterNavigationPause()
-                } else {
-                    speakOnly(
-                        "No pude iniciar la guía. Comprueba ubicación y cámara e inténtalo otra vez.",
-                    )
-                    openConversationWindow()
-                    resumeListening(directAfter = true)
                 }
             } else if (needsDirectInput) {
                 conversationWindowJob?.cancel()
@@ -1228,6 +1334,13 @@ class AssistantController @Inject constructor(
                 scheduleListen(delayMs = SamsungVoiceCompat.postSpeechDelayMs)
             } else {
                 conversationWindowJob?.cancel()
+                if (callMicSuspended) {
+                    if (incomingCallMonitor.isCallSessionActive()) {
+                        enterCallMicSuspend()
+                    } else {
+                        endCallMicSuspend()
+                    }
+                }
                 if (activeSessionTracker.isPausedForChat()) {
                     // Tras orden lateral sin confirmación pendiente: volver a wake sobre la sesión
                     enterNavigationPause()
@@ -1408,6 +1521,13 @@ class AssistantController @Inject constructor(
         if (!isActive) return false
         if (sleepModeController.isSleeping()) return false
 
+        // Si no hay llamada real, no mantener modo llamada (TTS muda / auricular).
+        incomingCallMonitor.refreshFromTelephony()
+        if (!incomingCallMonitor.isCallSessionActive()) {
+            if (callMicSuspended) endCallMicSuspend()
+            actionExecutor.restoreCallAudioRouting()
+        }
+
         softWaitToneEngine.stop()
         cancelScheduledListen()
         speechRecognitionManager.stopListening()
@@ -1426,8 +1546,11 @@ class AssistantController @Inject constructor(
             speechRecognitionManager.startDirectResponseListening(
                 onResult = { text ->
                     if (!isSpeaking) return@startDirectResponseListening
+                    val denyPending = actionExecutor.hasPendingConfirmation() &&
+                        actionExecutor.isNegative(text)
                     if (contextIntentDetector.isInterruptCommand(text) ||
-                        contextIntentDetector.isCancelPhrase(text)
+                        contextIntentDetector.isCancelPhrase(text) ||
+                        denyPending
                     ) {
                         userAbortDuringSpeech.set(true)
                         textToSpeechManager.stop()
@@ -1473,6 +1596,34 @@ class AssistantController @Inject constructor(
                 resumeAfterNavigationPause()
             }
         }
+    }
+
+    /** Tras contestar: sin STT; wake pasivo por si «Lázaro cuelga» cuando el mic esté libre. */
+    private fun enterCallMicSuspend() {
+        softWaitToneEngine.stop()
+        cancelScheduledListen()
+        speechRecognitionManager.stopListening()
+        voiceCaptureInProgress = false
+        conversationWindowJob?.cancel()
+        listenProfile = ListeningProfile.STANDBY
+        listeningSuspended = true
+        callMicSuspended = true
+        restoreWakeWordPassive()
+        markState(
+            voiceState = VoiceState.Idle,
+            statusMessage = "En llamada. Di Lázaro cuelga, o botón cancelar del bastón.",
+            awaitingTrigger = true,
+            partialTranscript = "",
+        )
+    }
+
+    private fun endCallMicSuspend() {
+        if (!callMicSuspended) {
+            return
+        }
+        callMicSuspended = false
+        listeningSuspended = false
+        actionExecutor.restoreCallAudioRouting()
     }
 
     private suspend fun resumeAfterNavigationPause() {

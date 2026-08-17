@@ -13,7 +13,7 @@ class BlindNavigationPhraseBuilderTest {
     @Test
     fun primaryActionsAreClearSpanish() {
         assertEquals(
-            "Camina hacia adelante.",
+            "Continúa hacia adelante.",
             BlindNavigationPhraseBuilder.primaryTip(BlindNavigationPhraseBuilder.Action.FORWARD),
         )
         assertEquals(
@@ -27,6 +27,10 @@ class BlindNavigationPhraseBuilderTest {
         assertEquals(
             "Da la vuelta.",
             BlindNavigationPhraseBuilder.primaryTip(BlindNavigationPhraseBuilder.Action.U_TURN),
+        )
+        assertTrue(
+            BlindNavigationPhraseBuilder.primaryTip(BlindNavigationPhraseBuilder.Action.CROSS)
+                .contains("cruzar", ignoreCase = true),
         )
     }
 
@@ -50,11 +54,21 @@ class BlindNavigationPhraseBuilderTest {
     @Test
     fun nextManeuverAndMilestonePhrases() {
         assertEquals(
-            "En unos 40 metros, gira a la izquierda.",
+            "Prepárate: en unos 40 metros, gira a la izquierda.",
             BlindNavigationPhraseBuilder.announceNextManeuver(
                 BlindNavigationPhraseBuilder.Action.TURN_LEFT,
                 40,
             ),
+        )
+        assertTrue(
+            BlindNavigationPhraseBuilder.announceCrossingAhead(
+                25,
+                BlindNavigationPhraseBuilder.CrossingSide.LEFT,
+            ).contains("izquierda"),
+        )
+        assertTrue(
+            BlindNavigationPhraseBuilder.announceContinueStraight(80, "Calle Real", 0)
+                .contains("adelante", ignoreCase = true),
         )
         assertTrue(
             BlindNavigationPhraseBuilder.announceDistanceMilestone(100, "Bar Sol")
@@ -86,7 +100,7 @@ class BlindNavigationPhraseBuilderTest {
         assertEquals(BlindNavigationPhraseBuilder.Action.FORWARD, action)
         assertTrue(
             BlindNavigationPhraseBuilder.announceFromMaps("Sigue recto 200 m")
-                .startsWith("Camina hacia adelante."),
+                .startsWith("Continúa hacia adelante."),
         )
     }
 

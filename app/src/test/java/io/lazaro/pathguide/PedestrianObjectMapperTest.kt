@@ -43,9 +43,18 @@ class PedestrianObjectMapperTest {
             PedestrianObjectMapper.phrase("coche", ObjectSide.CENTER),
         )
         assertEquals(
-            "silla delante",
-            PedestrianObjectMapper.phrase("silla", ObjectSide.CENTER),
+            "banco delante",
+            PedestrianObjectMapper.phrase("banco", ObjectSide.CENTER),
         )
+    }
+
+    @Test
+    fun rejectsNoisyIndoorCategories() {
+        assertEquals(null, PedestrianObjectMapper.spanishLabel("chair"))
+        assertEquals(null, PedestrianObjectMapper.spanishLabel("bottle"))
+        assertEquals(null, PedestrianObjectMapper.fromBox(
+            "chair", 0.9f, 20f, 20f, 80f, 80f, 100f, 100f,
+        ))
     }
 
     @Test
@@ -80,7 +89,7 @@ class PedestrianObjectMapperTest {
     @Test
     fun frontalBoostIncreasesWithArea() {
         val small = PedestrianObjectMapper.fromBox(
-            "chair", 0.6f, 40f, 40f, 55f, 70f, 100f, 100f,
+            "bicycle", 0.6f, 40f, 40f, 55f, 70f, 100f, 100f,
         )!!
         val large = PedestrianObjectMapper.fromBox(
             "car", 0.8f, 20f, 10f, 80f, 95f, 100f, 100f,

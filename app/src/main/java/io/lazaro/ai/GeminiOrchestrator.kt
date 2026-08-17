@@ -58,7 +58,7 @@ class GeminiOrchestrator @Inject constructor(
         actionExecutor.tryHandleAlarmIntent(cleaned)?.let { return toReply(it) }
         actionExecutor.tryHandleSceneLookIntent(cleaned)?.let { return toReply(it) }
 
-        // Colgar durante llamada activa: «Lázaro cuelga»
+        // Colgar/rechazar si suena, hay pending entrante o llamada activa («cuelga», «rechaza»…)
         actionExecutor.tryHandleHangupIntent(cleaned)?.let { return toReply(it) }
 
         if (actionExecutor.hasPendingConfirmation()) {

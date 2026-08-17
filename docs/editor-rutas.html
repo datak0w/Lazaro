@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Editor de rutas — Lazaro AI</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root {
+      --panel: #1a2332;
+      --ink: #e8eef6;
+      --accent: #3d8bfd;
+      --ok: #3ecf8e;
+      --warn: #f0b429;
+      --side-l: #5eead4;
+      --side-r: #fb923c;
+    }
+    html, body.editor-page { height: 100%; margin: 0; background: #0d141f; color: var(--ink); font-family: "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+    .editor-shell {
+      display: grid;
+      grid-template-columns: minmax(300px, 380px) 1fr;
+      height: 100vh;
+      height: 100dvh;
+    }
+    @media (max-width: 900px) {
+      .editor-shell { grid-template-columns: 1fr; grid-template-rows: minmax(40vh, 45vh) 1fr; overflow: auto; }
+      .map-wrap { min-height: 45vh; order: -1; }
+      .side { overflow: auto; }
+    }
+    .side {
+      background: var(--panel); padding: 1rem 1.1rem 2rem; overflow: auto;
+      border-right: 1px solid #2a3648;
+    }
+    .side h1 { font-size: 1.25rem; margin: 0 0 .35rem; }
+    .side p.lead { margin: 0 0 1rem; font-size: .92rem; opacity: .85; }
+    label { display: block; font-size: .8rem; margin: .65rem 0 .25rem; opacity: .9; }
+    input[type=text], textarea {
+      width: 100%; box-sizing: border-box; padding: .45rem .55rem;
+      border-radius: 6px; border: 1px solid #3a4a63; background: #0f1724; color: var(--ink);
+    }
+    textarea { min-height: 70px; resize: vertical; }
+    .tools { display: flex; flex-wrap: wrap; gap: .4rem; margin: .75rem 0; }
+    .tools button.active { background: var(--accent); color: #041018; }
+    .actions { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: 1rem; }
+    .actions .primary { background: var(--ok); color: #042015; }
+    .actions .warn { background: var(--warn); color: #1a1200; }
+    .tools button, .actions button {
+      border: 0; border-radius: 6px; padding: .45rem .7rem; cursor: pointer;
+      background: #2a3b55; color: var(--ink); font-weight: 600; font-size: .85rem;
+    }
+    .map-wrap {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      background: #1a2332;
+    }
+    #map {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      background: #1a2332;
+    }
+    .leaflet-container { width: 100% !important; height: 100% !important; background: #1a2332; }
+    .leaflet-tile { visibility: visible !important; opacity: 1 !important; }
+    .leaflet-zoom-anim .leaflet-tile { transition: none !important; }
+    .list { margin-top: .75rem; font-size: .85rem; }
+    .list li { margin: .35rem 0; padding: .35rem .4rem; background: #121b29; border-radius: 4px; }
+    .hint { font-size: .8rem; opacity: .75; margin: .5rem 0 0; }
+    a.back { color: var(--accent); }
+    .status { margin-top: .75rem; padding: .5rem; border-radius: 6px; background: #121b29; font-size: .85rem; }
+    .legend span { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: .35rem; vertical-align: middle; }
+    .zoom-hint {
+      position: absolute; z-index: 1000; right: 12px; top: 12px;
+      background: rgba(13,20,31,.88); color: #e8eef6; padding: .4rem .65rem;
+      border-radius: 6px; font-size: .8rem; pointer-events: none;
+    }
+    .layer-box {
+      background: #121b29; border-radius: 8px; padding: .55rem .65rem; margin: .4rem 0 .75rem;
+      border: 1px solid #2a3648;
+    }
+    .layer-box h3 {
+      margin: 0 0 .45rem; font-size: .78rem; text-transform: uppercase;
+      letter-spacing: .04em; opacity: .7; font-weight: 600;
+    }
+    .switch-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: .75rem; padding: .4rem 0; border-bottom: 1px solid #1e2a3c;
+    }
+    .switch-row:last-child { border-bottom: 0; }
+    .switch-row .label {
+      margin: 0; font-size: .9rem; opacity: 1; flex: 1; cursor: pointer;
+    }
+    .switch-row .sub {
+      display: block; font-size: .72rem; opacity: .65; margin-top: .1rem; font-weight: 400;
+    }
+    .switch {
+      position: relative; width: 44px; height: 26px; flex-shrink: 0;
+    }
+    .switch input {
+      opacity: 0; width: 0; height: 0; position: absolute;
+    }
+    .switch .slider {
+      position: absolute; inset: 0; cursor: pointer; background: #3a4a63;
+      border-radius: 26px; transition: .2s;
+    }
+    .switch .slider::before {
+      content: ""; position: absolute; height: 20px; width: 20px;
+      left: 3px; bottom: 3px; background: #e8eef6; border-radius: 50%; transition: .2s;
+    }
+    .switch input:checked + .slider { background: var(--accent); }
+    .switch input:checked + .slider::before { transform: translateX(18px); }
+    .switch input:focus-visible + .slider { outline: 2px solid #fff; outline-offset: 2px; }
+  </style>
+</head>
+<body class="editor-page">
+  <div class="editor-shell">
+    <aside class="side" aria-label="Panel del editor">
+      <p><a class="back" href="index.html">← Manual Lazaro</a></p>
+      <h1>Editor de rutas</h1>
+      <p class="lead">
+        Si el satélite tiene nubes, activa <strong>Calles claras</strong>.
+        Combina satélite + calles con los switches de abajo.
+      </p>
+
+      <div class="layer-box" aria-label="Capas base del mapa">
+        <h3>Capa base (elige una)</h3>
+        <div class="switch-row">
+          <label class="label" for="swStreets">Calles claras
+            <span class="sub">Sin nubes — nombres y trazado visibles</span>
+          </label>
+          <label class="switch">
+            <input type="radio" name="baseLayer" id="swStreets" value="streets" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="switch-row">
+          <label class="label" for="swOsm">OpenStreetMap
+            <span class="sub">Mapa vectorial clásico</span>
+          </label>
+          <label class="switch">
+            <input type="radio" name="baseLayer" id="swOsm" value="osm">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="switch-row">
+          <label class="label" for="swHot">OSM detallado
+            <span class="sub">Más contraste y caminos peatonales</span>
+          </label>
+          <label class="switch">
+            <input type="radio" name="baseLayer" id="swHot" value="hot">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="switch-row">
+          <label class="label" for="swSat">Satélite
+            <span class="sub">Foto aérea (puede haber nubes)</span>
+          </label>
+          <label class="switch">
+            <input type="radio" name="baseLayer" id="swSat" value="sat">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="layer-box" aria-label="Superposiciones">
+        <h3>Superposiciones (combinables)</h3>
+        <div class="switch-row">
+          <label class="label" for="swRoads">Calles encima
+            <span class="sub">Líneas de carreteras sobre satélite</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="swRoads">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="switch-row">
+          <label class="label" for="swNames">Nombres de sitios
+            <span class="sub">Etiquetas de calles y lugares</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="swNames">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="switch-row">
+          <label class="label" for="swTopo">Relieve / topo
+            <span class="sub">Útil en zonas de monte</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="swTopo">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+      <p class="hint">Con nubes: Calles claras. Para aceras: Satélite + Calles encima (zoom 17–19).</p>
+
+      <label for="routeName">Nombre de la ruta</label>
+      <input id="routeName" type="text" value="Camino del bar" autocomplete="off">
+
+      <label for="destLabel">Destino (etiqueta hablada)</label>
+      <input id="destLabel" type="text" value="Bar" autocomplete="off">
+
+      <p class="hint">Herramienta activa:</p>
+      <div class="tools" role="toolbar" aria-label="Herramientas del mapa">
+        <button type="button" id="toolPath" class="active">Camino</button>
+        <button type="button" id="toolCross">Cruce</button>
+        <button type="button" id="toolAnn">Anuncio</button>
+        <button type="button" id="toolSideL">Acera izq.</button>
+        <button type="button" id="toolSideR">Acera der.</button>
+      </div>
+      <p class="hint" id="toolHint">Clic en el mapa para añadir puntos del recorrido.</p>
+      <p class="legend hint">
+        <span style="background:#3d8bfd"></span>camino
+        <span style="background:#5eead4"></span>acera izq.
+        <span style="background:#fb923c"></span>acera der.
+        <span style="background:#f0b429"></span>cruce
+        <span style="background:#3ecf8e"></span>anuncio
+      </p>
+
+      <label for="annText">Texto del próximo anuncio</label>
+      <textarea id="annText" placeholder="Estás pasando justo frente al cementerio. Continúa derecho."></textarea>
+
+      <div class="actions">
+        <button type="button" class="primary" id="btnExport">Exportar JSON</button>
+        <button type="button" id="btnImport">Importar JSON</button>
+        <button type="button" class="warn" id="btnClear">Borrar todo</button>
+        <button type="button" id="btnUndo">Deshacer</button>
+        <button type="button" id="btnZoomIn">Zoom +</button>
+      </div>
+      <input type="file" id="fileImport" accept="application/json,.json,.lazaro-route.json" hidden>
+
+      <div class="status" id="status" role="status">Calles claras activas. Cambia a satélite cuando quieras ver la acera.</div>
+
+      <h2 style="font-size:1rem;margin:1.2rem 0 .4rem">Puntos</h2>
+      <ul class="list" id="listWp"></ul>
+      <h2 style="font-size:1rem;margin:1.2rem 0 .4rem">Aceras</h2>
+      <ul class="list" id="listSides"></ul>
+      <h2 style="font-size:1rem;margin:1.2rem 0 .4rem">Cruces</h2>
+      <ul class="list" id="listCross"></ul>
+      <h2 style="font-size:1rem;margin:1.2rem 0 .4rem">Anuncios</h2>
+      <ul class="list" id="listAnn"></ul>
+    </aside>
+    <div class="map-wrap">
+      <div id="map" role="application" aria-label="Mapa para dibujar la ruta"></div>
+      <div class="zoom-hint" id="zoomHint">Zoom 16</div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+(function () {
+  const FORMAT = "lazaro-route";
+  const SIDEWALK_OFFSET_M = 5.5;
+
+  const state = {
+    tool: "path",
+    waypoints: [],
+    crossings: [],
+    announcements: [],
+    sidewalkSides: [],
+    sidePaint: null,
+  };
+
+  // Zoom alto (>~20) deja el mapa en blanco: no hay teselas y Leaflet pierde precisión.
+  const MAP_MAX_ZOOM = 19;
+
+  const map = L.map("map", {
+    zoomControl: true,
+    maxZoom: MAP_MAX_ZOOM,
+    minZoom: 3,
+    zoomSnap: 1,
+    zoomDelta: 1,
+    // Las animaciones de fade/zoom dejan el mapa en blanco en varios navegadores
+    fadeAnimation: false,
+    zoomAnimation: false,
+    markerZoomAnimation: false,
+    inertia: false,
+  }).setView([36.5645, -4.8555], 16);
+
+  function tileOpts(nativeMax, extra) {
+    return Object.assign(
+      {
+        maxZoom: MAP_MAX_ZOOM,
+        maxNativeZoom: Math.min(nativeMax, MAP_MAX_ZOOM),
+        keepBuffer: 4,
+        updateWhenIdle: true,
+        updateWhenZooming: false,
+        detectRetina: false,
+      },
+      extra || {},
+    );
+  }
+
+  const streets = L.tileLayer(
+    "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+    tileOpts(18, {
+      subdomains: "abcd",
+      attribution: "&copy; OSM &copy; CARTO",
+    }),
+  );
+
+  const osm = L.tileLayer(
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    tileOpts(19, { attribution: "&copy; OpenStreetMap", subdomains: "abc" }),
+  );
+
+  // Estilo OSM-FR (el HOT antiguo fallaba en zoom ≥19: 404)
+  const osmHot = L.tileLayer(
+    "https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png",
+    tileOpts(19, {
+      attribution: "&copy; OpenStreetMap France",
+      subdomains: "abc",
+    }),
+  );
+
+  const esriSat = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    tileOpts(18, { attribution: "Esri World Imagery" }),
+  );
+
+  const esriLabels = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    tileOpts(18, { opacity: 0.95, pane: "overlayPane" }),
+  );
+
+  const esriRoads = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+    tileOpts(18, { opacity: 0.9, pane: "overlayPane" }),
+  );
+
+  const topo = L.tileLayer(
+    "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+    tileOpts(17, { opacity: 0.55, attribution: "&copy; OpenTopoMap", subdomains: "abc" }),
+  );
+
+  const baseLayers = {
+    streets: streets,
+    osm: osm,
+    hot: osmHot,
+    sat: esriSat,
+  };
+
+  const overlays = {
+    roads: esriRoads,
+    names: esriLabels,
+    topo: topo,
+  };
+
+  let activeBase = "streets";
+  streets.addTo(map);
+
+  function setBase(key) {
+    if (!baseLayers[key]) return;
+    Object.entries(baseLayers).forEach(([k, layer]) => {
+      if (k !== key && map.hasLayer(layer)) map.removeLayer(layer);
+    });
+    if (!map.hasLayer(baseLayers[key])) baseLayers[key].addTo(map);
+    activeBase = key;
+    const radio = document.querySelector('input[name="baseLayer"][value="' + key + '"]');
+    if (radio) radio.checked = true;
+    // Sobre satélite, las calles encima ayudan a orientarse
+    if (key === "sat" && !document.getElementById("swRoads").checked) {
+      document.getElementById("swRoads").checked = true;
+      syncOverlay("roads");
+    }
+    const tip = {
+      streets: "Calles claras: sin nubes, con nombres. Ideal para dibujar el camino.",
+      osm: "OpenStreetMap clásico.",
+      hot: "OSM detallado: buen contraste peatonal hasta zoom 19.",
+      sat: "Satélite. Si hay nubes, vuelve a Calles claras o activa Calles encima.",
+    };
+    setStatus(tip[key]);
+  }
+
+  function syncOverlay(key) {
+    const layer = overlays[key];
+    const ids = { roads: "swRoads", names: "swNames", topo: "swTopo" };
+    const on = document.getElementById(ids[key]).checked;
+    if (on && !map.hasLayer(layer)) layer.addTo(map);
+    if (!on && map.hasLayer(layer)) map.removeLayer(layer);
+  }
+
+  function syncAllOverlays() {
+    Object.keys(overlays).forEach(syncOverlay);
+  }
+
+  let pathLine = null;
+  const sideLines = [];
+  const markers = { wp: [], cross: [], ann: [] };
+
+  function setStatus(msg) {
+    document.getElementById("status").textContent = msg;
+  }
+
+  function updateZoomHint() {
+    const z = map.getZoom();
+    const el = document.getElementById("zoomHint");
+    el.textContent = z >= MAP_MAX_ZOOM
+      ? "Zoom " + z + " (máximo)"
+      : "Zoom " + z;
+  }
+  map.on("zoomend", updateZoomHint);
+  map.on("zoom", updateZoomHint);
+  updateZoomHint();
+
+  function setTool(tool) {
+    state.tool = tool;
+    state.sidePaint = tool === "sideL" ? "LEFT" : tool === "sideR" ? "RIGHT" : null;
+    document.querySelectorAll(".tools button").forEach((b) => b.classList.remove("active"));
+    const id = { path: "toolPath", cross: "toolCross", ann: "toolAnn", sideL: "toolSideL", sideR: "toolSideR" }[tool];
+    document.getElementById(id).classList.add("active");
+    const hints = {
+      path: "Clic: añade punto. Arrastra un punto azul para afinar sobre la acera.",
+      cross: "Clic: marca un paso de cebra / cruce.",
+      ann: "Clic: coloca el anuncio con el texto de abajo.",
+      sideL: "Clic en un tramo: acera a la IZQUIERDA (línea verde). Mejor en satélite zoom 18+.",
+      sideR: "Clic en un tramo: acera a la DERECHA (línea naranja). Mejor en satélite zoom 18+.",
+    };
+    document.getElementById("toolHint").textContent = hints[tool];
+  }
+
+  /** Desplaza un punto ~metros perpendicular al rumbo (LEFT = +90°). */
+  function offsetLatLng(lat, lng, bearingDeg, meters, side) {
+    const br = (bearingDeg + (side === "LEFT" ? 90 : -90)) * Math.PI / 180;
+    const R = 6378137;
+    const dLat = (meters * Math.cos(br)) / R * (180 / Math.PI);
+    const dLng = (meters * Math.sin(br)) / (R * Math.cos(lat * Math.PI / 180)) * (180 / Math.PI);
+    return [lat + dLat, lng + dLng];
+  }
+
+  function bearingDeg(a, b) {
+    const lat1 = a.lat * Math.PI / 180, lat2 = b.lat * Math.PI / 180;
+    const dLng = (b.lng - a.lng) * Math.PI / 180;
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+
+  function sideForIndex(index) {
+    const hit = state.sidewalkSides.find((s) => index >= s.fromIndex && index < s.toIndex);
+    return hit ? hit.side : null;
+  }
+
+  function clearDrawn() {
+    markers.wp.forEach((m) => map.removeLayer(m));
+    markers.cross.forEach((m) => map.removeLayer(m));
+    markers.ann.forEach((m) => map.removeLayer(m));
+    markers.wp = []; markers.cross = []; markers.ann = [];
+    if (pathLine) { map.removeLayer(pathLine); pathLine = null; }
+    sideLines.forEach((l) => map.removeLayer(l));
+    sideLines.length = 0;
+  }
+
+  function redraw() {
+    clearDrawn();
+
+    if (state.waypoints.length) {
+      pathLine = L.polyline(state.waypoints.map((p) => [p.lat, p.lng]), {
+        color: "#3d8bfd", weight: 4, opacity: 0.95,
+      }).addTo(map);
+
+      // Líneas de acera desplazadas para ver el lado correcto sobre satélite
+      for (let i = 0; i < state.waypoints.length - 1; i++) {
+        const side = sideForIndex(i);
+        if (!side || side === "EITHER" || side === "UNKNOWN") continue;
+        const a = state.waypoints[i], b = state.waypoints[i + 1];
+        const br = bearingDeg(a, b);
+        const aOff = offsetLatLng(a.lat, a.lng, br, SIDEWALK_OFFSET_M, side);
+        const bOff = offsetLatLng(b.lat, b.lng, br, SIDEWALK_OFFSET_M, side);
+        const line = L.polyline([aOff, bOff], {
+          color: side === "LEFT" ? "#5eead4" : "#fb923c",
+          weight: 7,
+          opacity: 0.9,
+          lineCap: "round",
+        }).bindTooltip("Acera " + (side === "LEFT" ? "izquierda" : "derecha")).addTo(map);
+        sideLines.push(line);
+      }
+
+      state.waypoints.forEach((p, i) => {
+        const m = L.marker([p.lat, p.lng], {
+          draggable: true,
+          autoPan: true,
+          title: "Punto " + (i + 1) + " (arrastrar)",
+        });
+        m.bindTooltip(String(i + 1), { permanent: false });
+        m.on("dragend", () => {
+          const ll = m.getLatLng();
+          state.waypoints[i] = { lat: ll.lat, lng: ll.lng };
+          redraw();
+          setStatus("Punto " + (i + 1) + " ajustado. Zoom " + map.getZoom().toFixed(1));
+        });
+        m.addTo(map);
+        markers.wp.push(m);
+      });
+    }
+
+    state.crossings.forEach((c, i) => {
+      const m = L.circleMarker([c.lat, c.lng], {
+        radius: 10, color: "#1a1200", fillColor: "#f0b429", fillOpacity: 0.95, weight: 2,
+      }).bindTooltip("Cruce " + (i + 1)).addTo(map);
+      markers.cross.push(m);
+    });
+    state.announcements.forEach((a) => {
+      const m = L.circleMarker([a.lat, a.lng], {
+        radius: 9, color: "#042015", fillColor: "#3ecf8e", fillOpacity: 0.95, weight: 2,
+      }).bindTooltip((a.text || "").slice(0, 48)).addTo(map);
+      markers.ann.push(m);
+    });
+    renderLists();
+  }
+
+  function renderLists() {
+    document.getElementById("listWp").innerHTML = state.waypoints.length
+      ? state.waypoints.map((p, i) => `<li>${i + 1}. ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</li>`).join("")
+      : "<li>(vacío)</li>";
+    document.getElementById("listSides").innerHTML = state.sidewalkSides.length
+      ? state.sidewalkSides.map((s) =>
+          `<li>Tramo ${s.fromIndex + 1}→${s.toIndex + 1}: acera ${s.side === "LEFT" ? "izquierda" : s.side === "RIGHT" ? "derecha" : s.side}</li>`
+        ).join("")
+      : "<li>(ninguna marcada)</li>";
+    document.getElementById("listCross").innerHTML = state.crossings.length
+      ? state.crossings.map((c, i) => `<li>${i + 1}. ${c.label}</li>`).join("")
+      : "<li>(ninguno)</li>";
+    document.getElementById("listAnn").innerHTML = state.announcements.length
+      ? state.announcements.map((a, i) => `<li>${i + 1}. ${escapeHtml(a.text.slice(0, 80))}</li>`).join("")
+      : "<li>(ninguno)</li>";
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function nearestSegmentIndex(lat, lng) {
+    if (state.waypoints.length < 2) return -1;
+    let best = -1, bestD = 1e9;
+    for (let i = 0; i < state.waypoints.length - 1; i++) {
+      const a = state.waypoints[i], b = state.waypoints[i + 1];
+      const d = distToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    // Umbral más amplio en metros vía grados (~0.00025 ≈ 25–30 m)
+    return bestD < 0.00035 ? best : -1;
+  }
+
+  function distToSegment(px, py, ax, ay, bx, by) {
+    const abx = bx - ax, aby = by - ay;
+    const apx = px - ax, apy = py - ay;
+    const ab2 = abx * abx + aby * aby || 1e-12;
+    let t = (apx * abx + apy * aby) / ab2;
+    t = Math.max(0, Math.min(1, t));
+    const cx = ax + t * abx, cy = ay + t * aby;
+    const dx = px - cx, dy = py - cy;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function setSideForSegment(segIndex, side) {
+    if (segIndex < 0) return;
+    state.sidewalkSides = state.sidewalkSides.filter(
+      (s) => !(segIndex >= s.fromIndex && segIndex < s.toIndex),
+    );
+    state.sidewalkSides.push({ fromIndex: segIndex, toIndex: segIndex + 1, side });
+    setStatus(
+      "Tramo " + (segIndex + 1) + " → acera " + (side === "LEFT" ? "izquierda (verde)" : "derecha (naranja)"),
+    );
+  }
+
+  map.on("click", (e) => {
+    const { lat, lng } = e.latlng;
+    if (state.tool === "path") {
+      state.waypoints.push({ lat, lng });
+      setStatus("Punto " + state.waypoints.length + " añadido. Arrástralo si hace falta.");
+    } else if (state.tool === "cross") {
+      state.crossings.push({ lat, lng, label: "Paso de cebra", radiusM: 18 });
+      setStatus("Cruce marcado.");
+    } else if (state.tool === "ann") {
+      const text = document.getElementById("annText").value.trim();
+      if (!text) {
+        setStatus("Escribe el texto del anuncio antes de colocar el punto.");
+        return;
+      }
+      state.announcements.push({ lat, lng, text, radiusM: 18, id: "ann-" + Date.now() });
+      setStatus("Anuncio colocado.");
+    } else if (state.sidePaint) {
+      if (map.getZoom() < 17) {
+        setStatus("Sube el zoom (al menos 17, mejor 18–20) para marcar la acera con precisión.");
+      }
+      const seg = nearestSegmentIndex(lat, lng);
+      if (seg < 0) {
+        setStatus("Clic más cerca del tramo azul del camino.");
+        return;
+      }
+      setSideForSegment(seg, state.sidePaint);
+    }
+    redraw();
+  });
+
+  function buildDoc() {
+    return {
+      format: FORMAT,
+      version: 1,
+      name: document.getElementById("routeName").value.trim() || "Ruta",
+      destinationLabel: document.getElementById("destLabel").value.trim() || null,
+      waypoints: state.waypoints,
+      sidewalkSides: state.sidewalkSides,
+      crossings: state.crossings,
+      announcements: state.announcements,
+    };
+  }
+
+  function loadDoc(doc) {
+    if (!doc || doc.format !== FORMAT) throw new Error("Formato desconocido");
+    document.getElementById("routeName").value = doc.name || "";
+    document.getElementById("destLabel").value = doc.destinationLabel || "";
+    state.waypoints = doc.waypoints || [];
+    state.sidewalkSides = doc.sidewalkSides || [];
+    state.crossings = doc.crossings || [];
+    state.announcements = doc.announcements || [];
+    redraw();
+    if (state.waypoints.length) {
+      map.fitBounds(L.latLngBounds(state.waypoints.map((p) => [p.lat, p.lng])), {
+        padding: [40, 40],
+        maxZoom: 20,
+      });
+    }
+    setStatus("Ruta cargada: " + doc.name);
+  }
+
+  document.querySelectorAll('input[name="baseLayer"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      if (el.checked) setBase(el.value);
+    });
+  });
+  document.getElementById("swRoads").addEventListener("change", () => syncOverlay("roads"));
+  document.getElementById("swNames").addEventListener("change", () => syncOverlay("names"));
+  document.getElementById("swTopo").addEventListener("change", () => syncOverlay("topo"));
+
+  document.getElementById("toolPath").onclick = () => setTool("path");
+  document.getElementById("toolCross").onclick = () => setTool("cross");
+  document.getElementById("toolAnn").onclick = () => setTool("ann");
+  document.getElementById("toolSideL").onclick = () => setTool("sideL");
+  document.getElementById("toolSideR").onclick = () => setTool("sideR");
+
+  document.getElementById("btnZoomIn").onclick = () => {
+    map.setZoom(Math.min(MAP_MAX_ZOOM, map.getZoom() + 1));
+  };
+
+  document.getElementById("btnUndo").onclick = () => {
+    if (state.tool === "path" && state.waypoints.length) state.waypoints.pop();
+    else if (state.tool === "cross" && state.crossings.length) state.crossings.pop();
+    else if (state.tool === "ann" && state.announcements.length) state.announcements.pop();
+    else if ((state.tool === "sideL" || state.tool === "sideR") && state.sidewalkSides.length) {
+      state.sidewalkSides.pop();
+    }
+    redraw();
+  };
+
+  document.getElementById("btnClear").onclick = () => {
+    if (!confirm("¿Borrar camino, cruces y anuncios?")) return;
+    state.waypoints = [];
+    state.crossings = [];
+    state.announcements = [];
+    state.sidewalkSides = [];
+    redraw();
+    setStatus("Todo borrado.");
+  };
+
+  document.getElementById("btnExport").onclick = () => {
+    const doc = buildDoc();
+    if (doc.waypoints.length < 2) {
+      setStatus("Necesitas al menos 2 puntos en el camino.");
+      return;
+    }
+    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    const safe = doc.name.replace(/[^\w\-]+/g, "_").slice(0, 40);
+    a.href = URL.createObjectURL(blob);
+    a.download = safe + ".lazaro-route.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setStatus("Exportado " + a.download);
+  };
+
+  document.getElementById("btnImport").onclick = () => document.getElementById("fileImport").click();
+  document.getElementById("fileImport").onchange = (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { loadDoc(JSON.parse(reader.result)); }
+      catch (e) { setStatus("No se pudo leer el JSON: " + e.message); }
+    };
+    reader.readAsText(file);
+    ev.target.value = "";
+  };
+
+  setTool("path");
+  setBase("streets");
+  syncAllOverlays();
+  redraw();
+
+  function fixMapSize() {
+    map.invalidateSize({ animate: false });
+  }
+  window.addEventListener("resize", fixMapSize);
+  requestAnimationFrame(fixMapSize);
+  setTimeout(fixMapSize, 100);
+  setTimeout(fixMapSize, 400);
+})();
+  </script>
+</body>
+</html>

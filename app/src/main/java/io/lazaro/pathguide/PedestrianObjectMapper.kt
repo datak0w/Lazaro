@@ -2,6 +2,7 @@ package io.lazaro.pathguide
 
 /**
  * Detección peatonal local (MediaPipe Object Detector, categorías COCO).
+ * Lista reducida a lo útil en calle: menos falsos positivos (silla, botella…).
  */
 enum class ObjectSide {
     LEFT,
@@ -27,8 +28,9 @@ data class PedestrianDetection(
 
 object PedestrianObjectMapper {
 
-    const val FRONTAL_AREA_MIN = 0.032f
+    const val FRONTAL_AREA_MIN = 0.045f
 
+    /** Solo categorías fiables en acera / tráfico. */
     val allowedCategories: List<String> = listOf(
         "person",
         "bicycle",
@@ -36,21 +38,10 @@ object PedestrianObjectMapper {
         "motorcycle",
         "bus",
         "truck",
+        "dog",
         "traffic light",
         "stop sign",
-        "fire hydrant",
-        "parking meter",
         "bench",
-        "chair",
-        "bottle",
-        "dog",
-        "cat",
-        "backpack",
-        "umbrella",
-        "handbag",
-        "suitcase",
-        "potted plant",
-        "skateboard",
     )
 
     private val spanishByCategory = mapOf(
@@ -62,19 +53,8 @@ object PedestrianObjectMapper {
         "truck" to "camión",
         "traffic light" to "semáforo",
         "stop sign" to "stop",
-        "fire hydrant" to "hidrante",
-        "parking meter" to "parquímetro",
-        "bench" to "banco",
-        "chair" to "silla",
-        "bottle" to "botella",
         "dog" to "perro",
-        "cat" to "gato",
-        "backpack" to "mochila",
-        "umbrella" to "paraguas",
-        "handbag" to "bolso",
-        "suitcase" to "maleta",
-        "potted plant" to "maceta",
-        "skateboard" to "patinete",
+        "bench" to "banco",
     )
 
     private val priority = mapOf(
@@ -87,18 +67,7 @@ object PedestrianObjectMapper {
         "dog" to 80,
         "stop sign" to 70,
         "traffic light" to 68,
-        "chair" to 60,
-        "bench" to 58,
-        "fire hydrant" to 55,
-        "bottle" to 40,
-        "backpack" to 35,
-        "suitcase" to 35,
-        "handbag" to 30,
-        "umbrella" to 28,
-        "potted plant" to 25,
-        "skateboard" to 22,
-        "parking meter" to 20,
-        "cat" to 18,
+        "bench" to 40,
     )
 
     fun spanishLabel(category: String): String? {
@@ -117,8 +86,8 @@ object PedestrianObjectMapper {
         val w = imageWidth.coerceAtLeast(1f)
         val cx = ((left + right) * 0.5f) / w
         return when {
-            cx < 0.34f -> ObjectSide.LEFT
-            cx > 0.66f -> ObjectSide.RIGHT
+            cx < 0.32f -> ObjectSide.LEFT
+            cx > 0.68f -> ObjectSide.RIGHT
             else -> ObjectSide.CENTER
         }
     }
@@ -195,7 +164,6 @@ object PedestrianObjectMapper {
         val frontal = detections.filter { it.isFrontal }
         if (frontal.isEmpty()) return 0f
         val best = frontal.maxOf { it.areaRatio }
-        // Menos agresivo: solo sube pitidos con obstáculo frontal grande.
         return ((best - FRONTAL_AREA_MIN) / 0.22f).coerceIn(0f, 1f)
             .let { 0.18f + it * 0.55f }
     }

@@ -60,13 +60,25 @@ object WhatsAppSendIntentDetector {
     fun isHangupDuringCall(userText: String): Boolean {
         val t = normalize(userText)
         if (t.isBlank()) return false
-        if (t == "cuelga" || t == "colgar" || t == "corta" || t == "cortar") return true
-        if (t.contains("cuelga") || t.contains("colgar")) return true
-        if (t.contains("corta la llamada") || t.contains("corta llamada")) return true
-        if (t.contains("termina la llamada") || t.contains("finaliza la llamada")) return true
-        if (t.contains("cuelga la llamada") || t.contains("cuelga llamada")) return true
-        return false
+        // «descuelga» / «descolgar» son para CONTESAR, no colgar.
+        if (t.contains("descuelga") || t.contains("descolgar")) return false
+        if (t in HANGUP_EXACT) return true
+        val tokens = t.split(' ')
+        if (tokens.any { it in HANGUP_EXACT }) return true
+        return HANGUP_PHRASES.any { t.contains(it) }
     }
+
+    private val HANGUP_EXACT = setOf(
+        "cuelga", "colgar", "corta", "cortar",
+        "rechaza", "rechazar", "rechazo",
+    )
+
+    private val HANGUP_PHRASES = listOf(
+        "cuelga la llamada", "cuelga llamada",
+        "corta la llamada", "corta llamada",
+        "termina la llamada", "finaliza la llamada",
+        "rechaza la llamada", "rechazar la llamada",
+    )
 
     private fun stripTrailingMessage(contact: String): String {
         // «María que llego tarde» → María (el cuerpo se graba por voz)

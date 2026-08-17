@@ -1,6 +1,11 @@
 package io.lazaro.voice
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Build
+import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
@@ -33,6 +38,11 @@ class TextToSpeechManager @Inject constructor(
     @Volatile
     private var activeFinish: (() -> Unit)? = null
 
+    private val audioManager: AudioManager? =
+        context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
+    private var focusRequest: AudioFocusRequest? = null
+
     suspend fun initialize(locale: Locale = Locale("es", "ES")) {
         if (tts != null && isReady) {
             setLanguage(locale)
@@ -44,7 +54,10 @@ class TextToSpeechManager @Inject constructor(
                 isReady = status == TextToSpeech.SUCCESS
                 if (isReady) {
                     setLanguage(currentLocale)
+                    applySpeechAudioAttributes()
                     tts?.setOnUtteranceProgressListener(utteranceListener)
+                } else {
+                    Log.e(TAG, "TTS init falló status=$status")
                 }
                 if (continuation.isActive) continuation.resume(Unit)
             }
@@ -56,6 +69,27 @@ class TextToSpeechManager @Inject constructor(
         val engine = tts ?: return
         engine.language = locale
         preferMaleSpanishVoice(engine, locale)
+        applySpeechAudioAttributes()
+    }
+
+    /**
+     * Multimedia (mismo volumen que el usuario sube con las teclas).
+     * USAGE_ASSISTANCE_ACCESSIBILITY en Samsung a menudo va a un stream a 0
+     * → se ve el texto y no se oye nada.
+     */
+    private fun applySpeechAudioAttributes() {
+        val engine = tts ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return
+        try {
+            engine.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "setAudioAttributes: ${e.message}")
+        }
     }
 
     /**
@@ -141,12 +175,16 @@ class TextToSpeechManager @Inject constructor(
     suspend fun speak(text: String, allowDuringSleep: Boolean = false): Boolean {
         if (sleepModeController.isSleeping() && !allowDuringSleep) return false
         val spoken = SpokenTextCleaner.forSpeech(text)
-        if (!isReady || spoken.isBlank()) return false
+        if (!isReady || spoken.isBlank()) {
+            Log.w(TAG, "speak omitido ready=$isReady blank=${spoken.isBlank()}")
+            return false
+        }
         stopRequested.set(false)
 
         val chunks = SpokenTextCleaner.chunkForTts(spoken)
         if (chunks.isEmpty()) return false
 
+        prepareAudibleOutput()
         _isSpeaking.value = true
         return try {
             for ((index, chunk) in chunks.withIndex()) {
@@ -158,6 +196,81 @@ class TextToSpeechManager @Inject constructor(
         } finally {
             _isSpeaking.value = false
             activeFinish = null
+            abandonPlaybackFocus()
+        }
+    }
+
+    private fun prepareAudibleOutput() {
+        val am = audioManager ?: return
+        try {
+            if (am.mode != AudioManager.MODE_NORMAL) {
+                am.mode = AudioManager.MODE_NORMAL
+                Log.i(TAG, "mode → NORMAL (antes no normal)")
+            }
+            // Volumen multimedia a 0 = texto en pantalla y silencio.
+            bumpStreamIfMuted(AudioManager.STREAM_MUSIC)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                bumpStreamIfMuted(AudioManager.STREAM_ACCESSIBILITY)
+            }
+            requestPlaybackFocus(am)
+        } catch (e: Exception) {
+            Log.w(TAG, "prepareAudibleOutput: ${e.message}")
+        }
+    }
+
+    private fun bumpStreamIfMuted(stream: Int) {
+        val am = audioManager ?: return
+        try {
+            val max = am.getStreamMaxVolume(stream)
+            if (max <= 0) return
+            val cur = am.getStreamVolume(stream)
+            if (cur == 0) {
+                val target = (max * 0.45f).toInt().coerceIn(1, max)
+                am.setStreamVolume(stream, target, 0)
+                Log.i(TAG, "stream $stream estaba a 0 → $target/$max")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "bumpStream $stream: ${e.message}")
+        }
+    }
+
+    private fun requestPlaybackFocus(am: AudioManager) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(attrs)
+                    .setOnAudioFocusChangeListener { }
+                    .build()
+                focusRequest = req
+                am.requestAudioFocus(req)
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(
+                    null,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "requestAudioFocus: ${e.message}")
+        }
+    }
+
+    private fun abandonPlaybackFocus() {
+        val am = audioManager ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                focusRequest?.let { am.abandonAudioFocusRequest(it) }
+                focusRequest = null
+            } else {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(null)
+            }
+        } catch (_: Exception) {
         }
     }
 
@@ -182,8 +295,14 @@ class TextToSpeechManager @Inject constructor(
             }
 
             val utteranceId = "lazaro-${System.currentTimeMillis()}-$index"
-            val result = engine.speak(chunk, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            // Forzar STREAM_MUSIC: se oye con el volumen de medios del Samsung.
+            val params = Bundle().apply {
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            }
+            val result = engine.speak(chunk, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
             if (result == TextToSpeech.ERROR) {
+                Log.e(TAG, "speak ERROR chunk=$index len=${chunk.length}")
                 finish(false)
             }
         }
@@ -198,6 +317,7 @@ class TextToSpeechManager @Inject constructor(
         _isSpeaking.value = false
         activeFinish?.invoke()
         activeFinish = null
+        abandonPlaybackFocus()
     }
 
     fun shutdown() {
@@ -218,10 +338,12 @@ class TextToSpeechManager @Inject constructor(
 
         @Deprecated("Deprecated in Java")
         override fun onError(utteranceId: String?) {
+            Log.w(TAG, "utterance onError id=$utteranceId")
             activeFinish?.invoke()
         }
 
         override fun onError(utteranceId: String?, errorCode: Int) {
+            Log.w(TAG, "utterance onError id=$utteranceId code=$errorCode")
             activeFinish?.invoke()
         }
     }

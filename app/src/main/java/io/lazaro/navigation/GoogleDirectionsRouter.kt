@@ -81,11 +81,10 @@ class GoogleDirectionsRouter @Inject constructor() {
                     val dur = step.optJSONObject("duration")?.optDouble("value", 0.0) ?: 0.0
                     val start = step.optJSONObject("start_location")
                     val man = step.optString("maneuver").ifBlank { "straight" }
-                    val (type, modifier) = mapGoogleManeuver(man)
                     val name = stripHtml(step.optString("html_instructions"))
                         .substringBefore(".")
                         .take(80)
-                        .ifBlank { null }
+                    val (type, modifier) = mapGoogleManeuver(man, name)
                     val geom = decodePolyline(step.optJSONObject("polyline")?.optString("points").orEmpty())
                     add(
                         OsrmStep(
@@ -118,8 +117,14 @@ class GoogleDirectionsRouter @Inject constructor() {
         }
     }
 
-    private fun mapGoogleManeuver(maneuver: String): Pair<String, String?> {
+    private fun mapGoogleManeuver(maneuver: String, instructionHtml: String = ""): Pair<String, String?> {
         val m = maneuver.lowercase()
+        val blob = "$m ${instructionHtml.lowercase()}"
+        if (blob.contains("cruz") || blob.contains("crosswalk") || blob.contains("crossing") ||
+            blob.contains("paso de cebra")
+        ) {
+            return "notification" to "cross"
+        }
         return when {
             m.contains("uturn") || m.contains("u-turn") -> "turn" to "uturn"
             m.contains("roundabout") -> "roundabout" to null

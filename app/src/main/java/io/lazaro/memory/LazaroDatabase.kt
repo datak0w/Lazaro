@@ -34,7 +34,7 @@ import io.lazaro.routes.entity.SavedRoute
         RouteMemoryLink::class,
         RouteSegment::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class LazaroDatabase : RoomDatabase() {

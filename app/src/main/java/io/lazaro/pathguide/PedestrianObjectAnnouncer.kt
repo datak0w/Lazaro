@@ -12,8 +12,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Avisos cortos de objetos MediaPipe: voz + debounce por categoría/lado.
- * Prioriza personas/vehículos/animales y deja hablar más en navegación.
+ * Avisos de objetos MediaPipe: solo tras estabilizar, con debounce largo
+ * para no saltar de etiqueta cada segundo.
  */
 @Singleton
 class PedestrianObjectAnnouncer @Inject constructor(
@@ -22,14 +22,16 @@ class PedestrianObjectAnnouncer @Inject constructor(
     private val navigationAudioCoordinator: NavigationAudioCoordinator,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var lastKey: String? = null
+    private val stabilizer = ObjectDetectionStabilizer()
+    private var lastCategory: String? = null
+    private var lastSide: ObjectSide? = null
     private var lastSpeakMs = 0L
-    private var lastSameKeyMs = 0L
 
     fun reset() {
-        lastKey = null
+        stabilizer.reset()
+        lastCategory = null
+        lastSide = null
         lastSpeakMs = 0L
-        lastSameKeyMs = 0L
     }
 
     fun consider(
@@ -41,31 +43,44 @@ class PedestrianObjectAnnouncer @Inject constructor(
     ) {
         if (sleepMuted || announcingOther) return
         if (sleepModeController.isSleeping()) return
+        // No anunciar objetos mientras se graba (solo pitidos / GPS).
+        if (mode == PathGuideMode.GRABANDO) return
         if (mode != PathGuideMode.NAVEGACION &&
             mode != PathGuideMode.PASEO &&
             mode != PathGuideMode.RUTA &&
             mode != PathGuideMode.DEBUG
         ) return
 
-        val primary = PedestrianObjectMapper.pickPrimary(detections) ?: return
-        val important = PedestrianObjectMapper.isHighPriority(primary.category)
-        val urgent = primary.isFrontal || important
+        val stable = stabilizer.update(detections) ?: return
+        val important = PedestrianObjectMapper.isHighPriority(stable.category)
+        val urgent = stable.isFrontal && important
 
-        if (!primary.isFrontal && primary.score < (if (important) 0.28f else 0.34f)) return
-        if (!primary.isFrontal && !important && primary.areaRatio < MIN_AREA) return
+        // Laterales: solo si son importantes y con buen score
+        if (!stable.isFrontal) {
+            if (!important) return
+            if (stable.score < 0.50f || stable.areaRatio < 0.028f) return
+        } else if (stable.score < 0.45f) {
+            return
+        }
 
-        val key = "${primary.spanish}:${primary.side}"
         val now = System.currentTimeMillis()
+        val sameObject = lastCategory == stable.category
+        val sideFlip = lastSide != null && lastSide != stable.side
+
+        // Misma categoría: no repetir pronto (aunque cambie el lado un poco)
+        if (sameObject && now - lastSpeakMs < SAME_OBJECT_MS) return
+        // Cambio de lado del mismo objeto: ignorar (evita izquierda↔delante)
+        if (sameObject && sideFlip && now - lastSpeakMs < SIDE_FLIP_IGNORE_MS) return
+        // Cualquier anuncio: gap mínimo
         val minGap = if (urgent) MIN_GAP_URGENT_MS else MIN_GAP_MS
         if (now - lastSpeakMs < minGap) return
-        if (key == lastKey && now - lastSameKeyMs < SAME_DEBOUNCE_MS) return
         if (!canSpeak(urgent)) return
         if (navigationAudioCoordinator.shouldDuckBeeps() && !urgent) return
 
-        lastKey = key
+        lastCategory = stable.category
+        lastSide = stable.side
         lastSpeakMs = now
-        lastSameKeyMs = now
-        val message = primary.phrase.replaceFirstChar { it.uppercase() } + "."
+        val message = stable.phrase.replaceFirstChar { it.uppercase() } + "."
         scope.launch {
             try {
                 textToSpeechManager.initialize()
@@ -78,9 +93,9 @@ class PedestrianObjectAnnouncer @Inject constructor(
 
     companion object {
         private const val TAG = "MpObjectAnnouncer"
-        private const val MIN_GAP_MS = 1_600L
-        private const val MIN_GAP_URGENT_MS = 1_200L
-        private const val SAME_DEBOUNCE_MS = 3_800L
-        private const val MIN_AREA = 0.012f
+        private const val MIN_GAP_MS = 4_500L
+        private const val MIN_GAP_URGENT_MS = 3_200L
+        private const val SAME_OBJECT_MS = 12_000L
+        private const val SIDE_FLIP_IGNORE_MS = 8_000L
     }
 }

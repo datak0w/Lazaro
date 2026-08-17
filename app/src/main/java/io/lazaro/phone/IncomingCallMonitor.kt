@@ -56,7 +56,47 @@ class IncomingCallMonitor @Inject constructor(
     @Volatile
     private var inActiveCall: Boolean = false
 
-    fun isInActiveCall(): Boolean = inActiveCall
+    @Volatile
+    private var isRinging: Boolean = false
+
+    fun isInActiveCall(): Boolean {
+        refreshFromTelephony()
+        return inActiveCall
+    }
+
+    fun isRinging(): Boolean {
+        refreshFromTelephony()
+        return isRinging
+    }
+
+    /** Suena o hay llamada en curso: hay que poder colgar/rechazar. */
+    fun isCallSessionActive(): Boolean {
+        refreshFromTelephony()
+        return isRinging || inActiveCall
+    }
+
+    /**
+     * Alinea flags internos con [TelephonyManager] (evita OFFHOOK atascado
+     * que silencia mic/TTS tras un hook de auricular fallido).
+     */
+    fun refreshFromTelephony() {
+        if (!hasPhoneStatePermission()) return
+        val tm = context.getSystemService(TelephonyManager::class.java) ?: return
+        when (tm.callState) {
+            TelephonyManager.CALL_STATE_RINGING -> {
+                isRinging = true
+                inActiveCall = false
+            }
+            TelephonyManager.CALL_STATE_OFFHOOK -> {
+                isRinging = false
+                inActiveCall = true
+            }
+            else -> {
+                isRinging = false
+                inActiveCall = false
+            }
+        }
+    }
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -64,17 +104,21 @@ class IncomingCallMonitor @Inject constructor(
             val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE).orEmpty()
             when (state) {
                 TelephonyManager.EXTRA_STATE_RINGING -> {
+                    isRinging = true
+                    inActiveCall = false
                     val rawNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
                         .orEmpty()
                         .trim()
                     onRinging(rawNumber)
                 }
                 TelephonyManager.EXTRA_STATE_OFFHOOK -> {
+                    isRinging = false
                     inActiveCall = true
                     lastRingKey = ""
                     _lifecycle.tryEmit(CallLifecycleEvent.OFFHOOK)
                 }
                 TelephonyManager.EXTRA_STATE_IDLE -> {
+                    isRinging = false
                     inActiveCall = false
                     lastRingKey = ""
                     _lifecycle.tryEmit(CallLifecycleEvent.IDLE)
@@ -95,6 +139,7 @@ class IncomingCallMonitor @Inject constructor(
                 context.registerReceiver(receiver, filter)
             }
             started = true
+            refreshFromTelephony()
         } catch (_: Exception) {
             started = false
         }
@@ -109,6 +154,7 @@ class IncomingCallMonitor @Inject constructor(
         }
         started = false
         inActiveCall = false
+        isRinging = false
     }
 
     private fun onRinging(rawNumber: String) {
@@ -117,6 +163,7 @@ class IncomingCallMonitor @Inject constructor(
         if (key == lastRingKey && now - lastRingAtMs < 4_000L) return
         lastRingKey = key
         lastRingAtMs = now
+        isRinging = true
         inActiveCall = false
 
         _lifecycle.tryEmit(CallLifecycleEvent.RINGING)

@@ -51,4 +51,6 @@ data class CrosswalkState(
     val detected: Boolean = false,
     val confidence: Float = 0f,
     val distanceMeters: Float = 0f,
+    /** -1 izquierda, 0 centro, +1 derecha (en imagen / frente al usuario). */
+    val lateralBias: Float = 0f,
 )

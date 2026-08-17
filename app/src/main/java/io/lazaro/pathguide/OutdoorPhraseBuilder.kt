@@ -8,12 +8,24 @@ object OutdoorPhraseBuilder {
 
     fun driftWarningPhrase(layout: StreetLayoutState): String? = null
 
-    fun crossSearchPhrase(): String = "Ahora hay que cruzar. Busco el paso de cebra."
+    fun crossSearchPhrase(): String = "Ahora tienes que cruzar. Busco el paso de cebra."
 
     fun crosswalkFoundPhrase(crosswalk: CrosswalkState): String? {
         if (!crosswalk.detected) return null
         val distance = SpatialPhraseBuilder.formatDistance(crosswalk.distanceMeters)
-        return "Paso de cebra a $distance delante. Cruza con cuidado."
+        val side = when {
+            crosswalk.lateralBias <= -0.35f -> "a tu izquierda"
+            crosswalk.lateralBias >= 0.35f -> "a tu derecha"
+            else -> "delante"
+        }
+        return when {
+            crosswalk.distanceMeters in 1f..12f ->
+                "Paso de cebra $side. Cruza ahora con cuidado."
+            crosswalk.lateralBias <= -0.35f || crosswalk.lateralBias >= 0.35f ->
+                "Paso de cebra $side a $distance. Prepárate para cruzar."
+            else ->
+                "Paso de cebra a $distance delante. Cruza con cuidado."
+        }
     }
 
     fun junctionTurnPhrase(

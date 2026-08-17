@@ -41,6 +41,13 @@ class RouteRecordingSampler @Inject constructor(
         lastGps = null
     }
 
+    /** Usa un fix previo para no perder los primeros metros sin callback GPS. */
+    fun seedGps(fix: GpsFix) {
+        lastGps = fix
+        accuracySum += fix.accuracyM
+        accuracyCount++
+    }
+
     fun bindGps(
         scope: CoroutineScope,
         fixes: kotlinx.coroutines.flow.Flow<GpsFix>,
@@ -71,12 +78,30 @@ class RouteRecordingSampler @Inject constructor(
         obstacleLabel: String?,
         phase: String = "RECORDING",
         now: Long = System.currentTimeMillis(),
+        fallbackLat: Double? = null,
+        fallbackLng: Double? = null,
+        fallbackAccuracyM: Float = 15f,
+        fallbackBearingDeg: Float = 0f,
     ): RouteObservation? {
         if (runId == 0L) return null
         if (now - lastCorridorSampleMs < CORRIDOR_INTERVAL_MS) return null
         lastCorridorSampleMs = now
 
-        val gps = lastGps ?: return null
+        var gps = lastGps
+        if (gps == null && fallbackLat != null && fallbackLng != null) {
+            gps = GpsFix(
+                lat = fallbackLat,
+                lng = fallbackLng,
+                accuracyM = fallbackAccuracyM,
+                bearingDeg = fallbackBearingDeg,
+                timestampMs = now,
+            )
+            lastGps = gps
+            accuracySum += fallbackAccuracyM
+            accuracyCount++
+        }
+        gps ?: return null
+
         val obs = RouteObservation(
             runId = runId,
             seq = seq++,

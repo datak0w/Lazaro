@@ -24,8 +24,8 @@ class ContextIntentDetector @Inject constructor() {
         if (!hasPending) return null
 
         return when {
-            matchesAny(text, UNCERTAIN_TRIGGERS) -> ContextIntent.PENDING_HELP
             isCancelPhrase(text) -> ContextIntent.CANCEL_PENDING
+            matchesAny(text, UNCERTAIN_TRIGGERS) -> ContextIntent.PENDING_HELP
             matchesAny(text, HELP_TRIGGERS) -> ContextIntent.PENDING_HELP
             matchesAny(text, NEW_COMMAND_TRIGGERS) || looksLikeNewCommand(text) ->
                 ContextIntent.NEW_COMMAND
@@ -144,12 +144,14 @@ class ContextIntentDetector @Inject constructor() {
 
         private val CANCEL_EXACT = setOf(
             "cancela", "cancelar", "olvida", "olvidalo", "dejalo", "paso",
+            "no", "nope", "negativo", "mejor no", "no quiero", "no gracias",
         )
 
         private val CANCEL_TRIGGERS = listOf(
             "cancela", "cancelar", "olvida", "olvidalo", "dejalo", "deja lo",
             "paso", "no importa", "salir", "nada olvida", "cancela todo", "otro dia",
-            "dejalo estar", "olvidate",
+            "dejalo estar", "olvidate", "mejor no", "no quiero", "no gracias",
+            "no llames", "no llamar",
         )
 
         /** Frases exactas cortas de interrupt → standby. */

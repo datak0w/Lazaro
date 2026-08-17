@@ -81,6 +81,12 @@ class OwnNavigationGuide @Inject constructor(
     private var lastStreetSideKey: String? = null
     /** Fuente del plan actual: google | osrm | none */
     private var routeSource: String = "none"
+    private var lastContinueStraightMs = 0L
+    private var continueStraightVariation = 0
+    private var lastHeadingCorrectMs = 0L
+    private var lastAnnouncedStreet: String? = null
+    private var lastSpokenManeuverIdx = -1
+    private var afterTurnPending = false
 
     fun start(navigationTarget: NavigationTarget) {
         stop()
@@ -147,6 +153,15 @@ class OwnNavigationGuide @Inject constructor(
         cachedMetersToManeuver = null
         cachedNextManeuver = null
         cachedOffRoute = false
+        lastContinueStraightMs = 0L
+        continueStraightVariation = 0
+        lastHeadingCorrectMs = 0L
+        lastAnnouncedStreet = null
+        lastSpokenManeuverIdx = -1
+        afterTurnPending = false
+        lastCrossingTipMs = 0L
+        lastStreetSideTipMs = 0L
+        lastStreetSideKey = null
     }
 
     fun hasRoute(): Boolean = target != null && (destLat != null || !target?.label.isNullOrBlank())
@@ -218,7 +233,8 @@ class OwnNavigationGuide @Inject constructor(
             announceNow(forceInitial = true)
         }
         while (active.get()) {
-            delay(LOOP_INTERVAL_MS)
+            val nearManeuver = (cachedMetersToManeuver ?: Int.MAX_VALUE) <= 90
+            delay(if (nearManeuver) LOOP_NEAR_MS else LOOP_INTERVAL_MS)
             if (!active.get()) break
             if (audioCoordinator.shouldDeferMapsSpeech()) continue
             if (textToSpeechManager.isSpeaking.value) continue
@@ -347,13 +363,35 @@ class OwnNavigationGuide @Inject constructor(
         advanceStepFromProgress(progress, origin.latitude, origin.longitude)
         refreshCacheFrom(origin, dLat, dLng, straightDist, progress)
         maybeOpenOwnTurnWindow(progress)
+        maybeMarkAfterTurn()
 
         if (!forceInitial && !mapsBlocksStrict()) {
-            maybeAnnounceLandmark(origin)?.let { tip ->
+            // Prioridad: cruce / giro / rumbo / calle / recto / hitos
+            maybeAnnounceCrossing(origin, progress)?.let { tip ->
+                speakTip(tip, urgent = true)
+                return
+            }
+            maybeAnnounceNextManeuver(progress)?.let { tip ->
+                speakTip(tip, urgent = true)
+                return
+            }
+            maybeAnnounceAfterTurn()?.let { tip ->
+                speakTip(tip, urgent = true)
+                return
+            }
+            maybeAnnounceHeadingCorrection(origin, dLat, dLng, progress)?.let { tip ->
+                speakTip(tip, urgent = true)
+                return
+            }
+            maybeAnnounceStreetChange()?.let { tip ->
                 speakTip(tip)
                 return
             }
-            maybeAnnounceCrossing(origin, progress)?.let { tip ->
+            maybeAnnounceContinueStraight(progress)?.let { tip ->
+                speakTip(tip)
+                return
+            }
+            maybeAnnounceLandmark(origin)?.let { tip ->
                 speakTip(tip)
                 return
             }
@@ -361,14 +399,12 @@ class OwnNavigationGuide @Inject constructor(
                 speakTip(tip)
                 return
             }
-            maybeAnnounceNextManeuver(progress)?.let { tip ->
-                speakTip(tip)
-                return
-            }
             maybeAnnounceStreetSide(cachedStreet)?.let { tip ->
                 speakTip(tip)
                 return
             }
+            // Sin tip especial: no repetir «camina adelante» cada ciclo (silencio → pitidos).
+            return
         }
 
         if (!forceInitial && mapsBlocksHeading()) return
@@ -392,11 +428,13 @@ class OwnNavigationGuide @Inject constructor(
                         firstStreet = firstNamed?.name,
                         firstAction = firstAction,
                     ),
+                    urgent = true,
                 )
+                lastContinueStraightMs = System.currentTimeMillis()
                 return
             }
             if (heading == null) {
-                speakTip(BlindNavigationPhraseBuilder.announceCalibrateHeading(label))
+                speakTip(BlindNavigationPhraseBuilder.announceCalibrateHeading(label), urgent = true)
                 return
             }
             val (action, distanceForTip) = resolveActionAndDistance(
@@ -404,14 +442,11 @@ class OwnNavigationGuide @Inject constructor(
             )
             speakTip(
                 BlindNavigationPhraseBuilder.announceInitialHeading(action, distanceForTip, label),
+                urgent = true,
             )
+            lastContinueStraightMs = System.currentTimeMillis()
             return
         }
-
-        val (action, distanceForTip) = resolveActionAndDistance(
-            origin, dLat, dLng, straightDist, heading, progress,
-        )
-        speakTip(BlindNavigationPhraseBuilder.announceOwnGuidance(action, distanceForTip))
     }
 
     private fun advanceStepFromProgress(progress: PolylineProgress?, lat: Double, lng: Double) {
@@ -482,27 +517,109 @@ class OwnNavigationGuide @Inject constructor(
         }
         val distM = metersToStep(step, progress)
         val band = when {
-            distM <= 15 -> 15
-            distM <= 35 -> 30
-            distM <= 90 -> 80
+            distM <= 12 -> 12
+            distM <= 25 -> 25
+            distM <= 55 -> 50
+            distM <= 120 -> 100
             else -> return null
         }
         val bands = announcedManeuverBands.getOrPut(idx) { mutableSetOf() }
         if (band in bands) return null
-        // Al anunciar 30, marcar 80; al anunciar 15, marcar 30 y 80
         when (band) {
-            15 -> bands.addAll(listOf(15, 30, 80))
-            30 -> bands.addAll(listOf(30, 80))
-            else -> bands.add(80)
+            12 -> bands.addAll(listOf(12, 25, 50, 100))
+            25 -> bands.addAll(listOf(25, 50, 100))
+            50 -> bands.addAll(listOf(50, 100))
+            else -> bands.add(100)
         }
         val tip = BlindNavigationPhraseBuilder.announceNextManeuver(
             action = action,
-            distanceM = distM.coerceIn(5, 400),
+            distanceM = distM.coerceIn(5, 500),
             streetName = step.name,
         )
         cachedNextManeuver = tip
+        lastSpokenManeuverIdx = idx
+        afterTurnPending = true
         openTurnFusionForStep(step, idx)
         return tip
+    }
+
+    private fun maybeMarkAfterTurn() {
+        if (!afterTurnPending || lastSpokenManeuverIdx < 0) return
+        // Si ya pasamos el step anunciado, confirmar el giro en el próximo ciclo.
+        if (stepIndex > lastSpokenManeuverIdx) {
+            // keep afterTurnPending true until spoken
+        } else if (stepIndex == lastSpokenManeuverIdx) {
+            val step = steps.getOrNull(stepIndex) ?: return
+            val dist = lastProgress?.let { metersToStep(step, it) } ?: return
+            if (dist <= 8) {
+                // casi en el punto del giro: esperar a avanzar
+            }
+        }
+    }
+
+    private fun maybeAnnounceAfterTurn(): String? {
+        if (!afterTurnPending || lastSpokenManeuverIdx < 0) return null
+        if (stepIndex <= lastSpokenManeuverIdx) return null
+        afterTurnPending = false
+        lastContinueStraightMs = System.currentTimeMillis()
+        return BlindNavigationPhraseBuilder.announceAfterTurn()
+    }
+
+    private fun maybeAnnounceContinueStraight(progress: PolylineProgress?): String? {
+        val now = System.currentTimeMillis()
+        if (now - lastContinueStraightMs < CONTINUE_STRAIGHT_MS) return null
+        val metersToMan = cachedMetersToManeuver
+        // Cerca de un giro: no decir «sigue recto», ya habrá maniobra.
+        if (metersToMan != null && metersToMan <= 55) return null
+        val action = cachedAction
+        if (action != null &&
+            action != BlindNavigationPhraseBuilder.Action.FORWARD &&
+            action != BlindNavigationPhraseBuilder.Action.OTHER
+        ) {
+            return null
+        }
+        lastContinueStraightMs = now
+        continueStraightVariation++
+        return BlindNavigationPhraseBuilder.announceContinueStraight(
+            metersToNextManeuver = metersToMan,
+            streetName = cachedStreet,
+            variation = continueStraightVariation,
+        )
+    }
+
+    private fun maybeAnnounceHeadingCorrection(
+        origin: LocationAction.UserLocation,
+        dLat: Double,
+        dLng: Double,
+        progress: PolylineProgress?,
+    ): String? {
+        val now = System.currentTimeMillis()
+        if (now - lastHeadingCorrectMs < HEADING_CORRECT_MS) return null
+        val heading = currentHeadingDeg() ?: return null
+        val targetBearing = bearingHintDegrees()
+            ?: NavigationBearing.bearingDeg(origin.latitude, origin.longitude, dLat, dLng)
+        val rel = NavigationBearing.relativeBearingDeg(heading, targetBearing)
+        val absRel = kotlin.math.abs(rel)
+        if (absRel < 35f) return null
+        // Si hay maniobra cercana, no contradecir el giro previsto.
+        val metersToMan = cachedMetersToManeuver
+        if (metersToMan != null && metersToMan <= 40) return null
+        val action = NavigationBearing.actionFromRelativeBearing(rel)
+        val tip = BlindNavigationPhraseBuilder.announceHeadingCorrection(action) ?: return null
+        lastHeadingCorrectMs = now
+        return tip
+    }
+
+    private fun maybeAnnounceStreetChange(): String? {
+        val street = cachedStreet?.trim()?.takeIf { it.length >= 2 } ?: return null
+        if (street.equals(lastAnnouncedStreet, ignoreCase = true)) return null
+        // No anunciar la primera calle del arranque (ya va en route start).
+        if (lastAnnouncedStreet == null && announcedInitial) {
+            lastAnnouncedStreet = street
+            return null
+        }
+        lastAnnouncedStreet = street
+        return BlindNavigationPhraseBuilder.announceStreetChange(street)
     }
 
     private fun maybeOpenOwnTurnWindow(progress: PolylineProgress?) {
@@ -625,9 +742,27 @@ class OwnNavigationGuide @Inject constructor(
         val now = System.currentTimeMillis()
         if (now - lastCrossingTipMs < CROSSING_COOLDOWN_MS) return null
         val next = nextManeuverStep()
+        val nextAction = next?.let { osrmFootRouter.actionForStep(it) }
         val distToManeuver = next?.let { metersToStep(it, progress) } ?: Int.MAX_VALUE
-        // Solo cerca de un giro/cruce o en general al acercarse a un crossing OSM
-        if (distToManeuver > 100 && progress == null) return null
+        // Priorizar si la ruta dice cruzar, o si hay crossing OSM cerca.
+        val routeSaysCross = nextAction == BlindNavigationPhraseBuilder.Action.CROSS &&
+            distToManeuver <= 100
+        if (!routeSaysCross && distToManeuver > 120 && progress == null) return null
+
+        if (routeSaysCross && distToManeuver <= 30) {
+            lastCrossingTipMs = now
+            mapsVisionFusionCoordinator.onOwnInstruction(
+                type = MapsInstructionType.CROSS_STREET,
+                rawText = "cruce peatonal",
+            )
+            audioCoordinator.openOwnCrossSearch()
+            return BlindNavigationPhraseBuilder.announceNextManeuver(
+                BlindNavigationPhraseBuilder.Action.CROSS,
+                distToManeuver.coerceIn(5, 100),
+                next?.name,
+            )
+        }
+
         val hint = ojenMapBundle.nearestCrossing(
             origin.latitude,
             origin.longitude,
@@ -639,8 +774,27 @@ class OwnNavigationGuide @Inject constructor(
                 type = MapsInstructionType.CROSS_STREET,
                 rawText = "cruce peatonal",
             )
+            audioCoordinator.openOwnCrossSearch()
         }
-        return BlindNavigationPhraseBuilder.announceCrossingAhead(hint.distanceM.toInt())
+        val side = crossingSideRelative(origin, hint.lat, hint.lng)
+        return BlindNavigationPhraseBuilder.announceCrossingAhead(hint.distanceM.toInt(), side)
+    }
+
+    private fun crossingSideRelative(
+        origin: LocationAction.UserLocation,
+        crossLat: Double,
+        crossLng: Double,
+    ): BlindNavigationPhraseBuilder.CrossingSide {
+        val heading = currentHeadingDeg() ?: return BlindNavigationPhraseBuilder.CrossingSide.AHEAD
+        val bearing = NavigationBearing.bearingDeg(
+            origin.latitude, origin.longitude, crossLat, crossLng,
+        )
+        val rel = NavigationBearing.relativeBearingDeg(heading, bearing)
+        return when {
+            rel < -25f -> BlindNavigationPhraseBuilder.CrossingSide.LEFT
+            rel > 25f -> BlindNavigationPhraseBuilder.CrossingSide.RIGHT
+            else -> BlindNavigationPhraseBuilder.CrossingSide.AHEAD
+        }
     }
 
     private fun resolveActionAndDistance(
@@ -777,11 +931,11 @@ class OwnNavigationGuide @Inject constructor(
         return if (gps != null && gps > 0f) NavigationBearing.normalizeHeadingDeg(gps) else null
     }
 
-    private suspend fun speakTip(tip: String) {
+    private suspend fun speakTip(tip: String, urgent: Boolean = false) {
         if (sleepModeController.isSleeping()) return
         val now = System.currentTimeMillis()
         if (tip == lastOwnTip && now - lastOwnTipMs < MIN_SAME_TIP_MS) return
-        if (now - lastOwnTipMs < MIN_TIP_INTERVAL_MS && tip == lastOwnTip) return
+        if (!urgent && now - lastOwnTipMs < MIN_TIP_INTERVAL_MS) return
         lastOwnTip = tip
         lastOwnTipMs = now
         try {
@@ -822,21 +976,22 @@ class OwnNavigationGuide @Inject constructor(
     companion object {
         private const val TAG = "OwnNavigationGuide"
         private const val INITIAL_DELAY_MS = 1_000L
-        private const val LOOP_INTERVAL_MS = 5_000L
-        private const val MAPS_SILENCE_MS = 8_000L
-        private const val MAPS_MANEUVER_SILENCE_MS = 8_000L
-        private const val MIN_SAME_TIP_MS = 12_000L
-        private const val MIN_TIP_INTERVAL_MS = 5_500L
+        private const val LOOP_INTERVAL_MS = 4_000L
+        private const val LOOP_NEAR_MS = 2_500L
+        private const val MIN_SAME_TIP_MS = 10_000L
+        private const val MIN_TIP_INTERVAL_MS = 7_000L
+        private const val CONTINUE_STRAIGHT_MS = 18_000L
+        private const val HEADING_CORRECT_MS = 14_000L
         private const val ARRIVE_RADIUS_M = 18.0
         private const val STEP_ADVANCE_M = 22.0
         private const val STEP_ADVANCE_ALONG_M = 12.0
         private const val OFF_ROUTE_M = 35.0
         private const val RECALC_COOLDOWN_MS = 45_000L
-        private const val OWN_TURN_WINDOW_M = 35
+        private const val OWN_TURN_WINDOW_M = 40
         private const val LANDMARK_RADIUS_M = 180.0
         private const val LANDMARK_COOLDOWN_MS = 45_000L
-        private const val CROSSING_HINT_RADIUS_M = 80.0
-        private const val CROSSING_COOLDOWN_MS = 50_000L
+        private const val CROSSING_HINT_RADIUS_M = 90.0
+        private const val CROSSING_COOLDOWN_MS = 28_000L
         private const val MAX_GPS_ACCURACY_M = 25f
         private const val MAX_GPS_ACCURACY_START_M = 40f
         private const val STREET_SIDE_COOLDOWN_MS = 90_000L

@@ -1,5 +1,7 @@
 package io.lazaro.ui.memory
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -60,6 +62,12 @@ fun MemoryManagementScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    val importRouteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) viewModel.importRouteFromUri(uri)
+    }
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -109,6 +117,27 @@ fun MemoryManagementScreen(
                             contentDescription = "Estado: ${uiState.statusMessage}"
                         },
                     )
+                }
+            }
+
+            item {
+                SectionHeader(
+                    title = "Rutas del editor",
+                    description = "Importa un archivo .lazaro-route.json creado en el editor web " +
+                        "(manual → Editor de rutas). Incluye aceras, cruces y anuncios.",
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        importRouteLauncher.launch(
+                            arrayOf("application/json", "text/plain", "*/*"),
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { contentDescription = "Importar ruta desde archivo JSON" },
+                ) {
+                    Text("Importar ruta (.json)")
                 }
             }
 

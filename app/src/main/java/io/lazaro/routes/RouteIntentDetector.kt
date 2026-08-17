@@ -10,6 +10,7 @@ enum class RouteIntent {
     LIST_ROUTES,
     DELETE_ROUTE,
     ROUTE_DETAILS,
+    IMPORT_ROUTE,
 }
 
 @Singleton
@@ -19,6 +20,7 @@ class RouteIntentDetector @Inject constructor() {
         val text = normalize(userText)
         if (text.isBlank()) return null
         return when {
+            IMPORT_TRIGGERS.any { text.contains(it) } -> RouteIntent.IMPORT_ROUTE
             STOP_TRIGGERS.any { text.contains(it) } -> RouteIntent.STOP_RECORDING
             START_TRIGGERS.any { text.contains(it) } -> RouteIntent.START_RECORDING
             LIST_TRIGGERS.any { text.contains(it) } -> RouteIntent.LIST_ROUTES
@@ -75,8 +77,9 @@ class RouteIntentDetector @Inject constructor() {
         private val STOP_WORDS = setOf("grabando", "activa", "ahora")
 
         private val START_TRIGGERS = listOf(
-            "graba ruta", "grabar ruta", "empieza a grabar", "inicia grabacion",
-            "inicia grabación", "grabando ruta", "nueva ruta",
+            "graba ruta", "grabar ruta", "graba una ruta", "grabar una ruta",
+            "empieza a grabar", "inicia grabacion", "inicia grabación",
+            "grabando ruta", "nueva ruta", "empieza grabacion", "empieza grabación",
             "regraba", "regrabar", "vuelve a grabar", "afina la ruta", "afinar ruta",
             "graba otra vez",
         )
@@ -103,6 +106,11 @@ class RouteIntentDetector @Inject constructor() {
         private val DETAIL_TRIGGERS = listOf(
             "detalles de la ruta", "detalle de la ruta", "info de la ruta",
             "informacion de la ruta", "información de la ruta",
+        )
+
+        private val IMPORT_TRIGGERS = listOf(
+            "importa ruta", "importar ruta", "importa la ruta", "importar la ruta",
+            "carga ruta", "cargar ruta", "abre el editor de rutas",
         )
     }
 }

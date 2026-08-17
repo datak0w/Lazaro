@@ -395,9 +395,17 @@ class ActionExecutor @Inject constructor(
     }
 
     fun tryHandleHangupIntent(userText: String): ActionResult? {
-        if (!incomingCallMonitor.isInActiveCall()) return null
         if (!WhatsAppSendIntentDetector.isHangupDuringCall(userText)) return null
-        return callAction.hangUpActiveCall()
+        // Suena: rechazar. En curso: colgar. También si hay pending de llamada entrante.
+        val pendingIncoming = pendingConfirmation?.toolName == CallAction.TOOL_ANSWER_INCOMING
+        if (!incomingCallMonitor.isCallSessionActive() && !pendingIncoming) return null
+        pendingConfirmation = null
+        lastPromptText = ""
+        return if (incomingCallMonitor.isRinging() || pendingIncoming && !incomingCallMonitor.isInActiveCall()) {
+            callAction.rejectIncomingCall()
+        } else {
+            callAction.hangUpActiveCall()
+        }
     }
 
     /** Pendiente de dictado texto WhatsApp (sin número para nota de voz). */
@@ -466,6 +474,11 @@ class ActionExecutor @Inject constructor(
             pendingConfirmation = null
             lastPromptText = ""
         }
+    }
+
+    /** Restaura MODE_NORMAL para que el TTS se oiga por altavoz. */
+    fun restoreCallAudioRouting() {
+        callAction.restoreNormalAudio()
     }
 
     fun isVoiceNoteRecording(): Boolean = whatsAppVoiceNoteAction.isRecording()
@@ -872,6 +885,8 @@ class ActionExecutor @Inject constructor(
         val pending = pendingConfirmation
         val wasResume = pending?.toolName == ToolName.ResumeActiveSession.id
         val wasIncoming = pending?.toolName == CallAction.TOOL_ANSWER_INCOMING
+        val wasOutgoingCall = pending?.toolName == ToolName.MakeCall.id ||
+            pending?.toolName == "select_contact_call"
         pendingConfirmation = null
         pendingSkill = null
         pendingNavigationTarget = null
@@ -884,6 +899,9 @@ class ActionExecutor @Inject constructor(
         memoryActionHandler.rejectMemoryProposal()
         if (wasIncoming) {
             return callAction.rejectIncomingCall()
+        }
+        if (wasOutgoingCall) {
+            return ActionResult.Success("Vale, no llamo.")
         }
         if (wasResume) {
             val kind = activeSessionTracker.snapshot()?.kind
@@ -950,19 +968,25 @@ class ActionExecutor @Inject constructor(
             "si", "confirmo", "confirmar", "vale", "ok", "de acuerdo", "yes",
             "claro", "adelante", "por supuesto", "correcto", "afirmativo",
             "responde", "responder", "contesta", "contestar", "acepta", "aceptar",
-            "coge", "coger", "cogelo", "cogela", "cogelos",
-            "descuélgame", "descuelga", "atiende", "atiendela",
+            "coge", "coger", "cogelo", "cogela", "cogelos", "coge la llamada",
+            "coger la llamada", "coge la llamada", "descuelga", "descolgar",
+            "descuélgame", "descuelga", "atiende", "atiendela", "dale",
+            "si responde", "si contesta", "si cogelo",
         )
         private val AFFIRMATIVE_PREFIXES = listOf(
             "si", "vale", "ok", "claro", "de acuerdo", "por supuesto",
-            "responde", "contesta", "acepta", "coge", "cogelo", "atiende",
+            "responde", "contesta", "acepta", "coge", "cogelo", "cogela",
+            "atiende", "descuelga", "descolgar",
         )
         private val NEGATIVE_EXACT = setOf(
             "no", "nope", "negativo", "cancelar", "cancela", "nel", "paso",
             "rechaza", "rechazar", "cuelga", "colgar", "ignora", "ignorar",
+            "no gracias", "mejor no", "no quiero", "no llames", "no llamar",
+            "ninguno", "ninguna", "nada",
         )
         private val NEGATIVE_PREFIXES = listOf(
             "no", "cancela", "cancelar", "rechaza", "cuelga", "ignora",
+            "mejor no", "no quiero", "no gracias", "no llames",
         )
         private val UNCERTAIN_DENY = listOf(
             "no se", "no lo se", "no entend", "no estoy seguro",

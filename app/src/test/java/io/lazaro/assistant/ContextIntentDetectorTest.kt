@@ -1,5 +1,6 @@
 package io.lazaro.assistant
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,5 +33,16 @@ class ContextIntentDetectorTest {
         assertTrue(detector.isNavigationStopPhrase("terminar navegación"))
         assertTrue(detector.isNavigationStopPhrase("cerrar maps"))
         assertTrue(detector.isNavigationStopPhrase("terminar paseo"))
+    }
+
+    @Test
+    fun noCancelsPending() {
+        assertTrue(detector.isCancelPhrase("no"))
+        assertTrue(detector.isCancelPhrase("mejor no"))
+        assertTrue(detector.isCancelPhrase("no quiero"))
+        assertEquals(
+            ContextIntent.CANCEL_PENDING,
+            detector.detect("no", hasPending = true),
+        )
     }
 }

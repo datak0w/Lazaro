@@ -55,7 +55,7 @@ class MediaPipeLiveObjectDetector @Inject constructor(
                             .build(),
                     )
                     .setRunningMode(RunningMode.LIVE_STREAM)
-                    .setMaxResults(6)
+                    .setMaxResults(4)
                     .setScoreThreshold(SCORE_THRESHOLD)
                     .setCategoryAllowlist(PedestrianObjectMapper.allowedCategories)
                     .setResultListener { result, inputImage ->
@@ -222,8 +222,8 @@ class MediaPipeLiveObjectDetector @Inject constructor(
     companion object {
         private const val TAG = "MpObjectDetector"
         const val MODEL_ASSET = "efficientdet_lite0.tflite"
-        private const val SCORE_THRESHOLD = 0.28f
-        private const val MIN_INTERVAL_MS = 100L
+        private const val SCORE_THRESHOLD = 0.40f
+        private const val MIN_INTERVAL_MS = 180L
         private const val INPUT_MAX_SIDE = 416
     }
 }
