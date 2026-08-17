@@ -28,14 +28,16 @@ class WakeWordController @Inject constructor(
     val status: StateFlow<WakeWordStatus> = _status.asStateFlow()
 
     private var scope: CoroutineScope? = null
-    private var onDetected: (() -> Unit)? = null
+    private var onDetected: ((String) -> Unit)? = null
     private var modelPath: String? = null
     private var restartJob: Job? = null
     private var shouldRun = false
 
-    fun bind(scope: CoroutineScope, onWakeWordDetected: () -> Unit) {
+    fun bind(scope: CoroutineScope, onWakeWordDetected: (String) -> Unit) {
         this.scope = scope
-        onDetected = onWakeWordDetected
+        onDetected = { command ->
+            scope.launch { onWakeWordDetected(command) }
+        }
         microphoneArbitrator.bind(
             scope = scope,
             onPausePassive = { pausePassive() },
@@ -108,7 +110,7 @@ class WakeWordController @Inject constructor(
 
         offlineWakeWordEngine.start(
             modelPath = path,
-            onDetected = { onDetected?.invoke() },
+            onDetected = { command -> onDetected?.invoke(command) },
             onError = { message ->
                 if (message.isNotBlank()) {
                     _status.value = WakeWordStatus.ERROR

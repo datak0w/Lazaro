@@ -116,6 +116,8 @@ class AssistantController @Inject constructor(
     private var lastStateChangeMs = System.currentTimeMillis()
     private var lastWakeHandledMs = 0L
     private var lastVolumeUpMs = 0L
+    /** Comando que Vosk ya oyó tras «Lázaro»; fallback si Google STT llega vacío. */
+    private var pendingWakeCommand: String = ""
 
     fun bind(scope: CoroutineScope) {
         this.scope = scope
@@ -178,16 +180,16 @@ class AssistantController @Inject constructor(
         listenProfile = ListeningProfile.STANDBY
         startWatchdog()
         caneBleManager.setSleepBlocked(false)
-        wakeWordController.start()
         incomingCallMonitor.start()
         caneLowBatteryMonitor.start { _uiState.value.voiceState }
         scope?.launch {
-            // Hidratar antes de decidir: evita arrancar en «listo» si ya estaba dormido.
+            // Hidratar y marcar sleep ANTES de arrancar Vosk: si no, «Lázaro» abre STT en dormir.
             sleepModeController.hydrateFromPrefs()
             val sleeping = sleepModeController.isSleeping()
             wakeWordController.setSleepMode(sleeping)
             pathGuideController.setSleepMuted(sleeping)
             assistantPrefs.setWantsAssistantRunning(true)
+            wakeWordController.start()
             if (sleeping) {
                 softWaitToneEngine.stop()
                 speechRecognitionManager.stopListening()
@@ -251,6 +253,7 @@ class AssistantController @Inject constructor(
         processingJob = null
         forceStopOutput()
         resetCounters()
+        pendingWakeCommand = ""
         listenProfile = ListeningProfile.DIRECT_RESPONSE
         wakeWordNotifier.playActivationSound()
         wakeWordController.pauseForCommand()
@@ -422,6 +425,7 @@ class AssistantController @Inject constructor(
         cancelScheduledListen()
         speechRecognitionManager.stopListening()
         voiceCaptureInProgress = false
+        pendingWakeCommand = ""
 
         sleepModeController.enterSleep()
         wakeWordController.setSleepMode(true)
@@ -450,6 +454,7 @@ class AssistantController @Inject constructor(
         pathGuideController.setSleepMuted(false)
         listeningSuspended = false
         voiceCaptureInProgress = false
+        pendingWakeCommand = ""
         blindStatusSpeaker.announceWaking()
         markState(VoiceState.Idle, "Despierto.", awaitingTrigger = true)
         restoreWakeWordPassive()
@@ -567,6 +572,7 @@ class AssistantController @Inject constructor(
         if (sleepModeController.isSleeping()) {
             speechRecognitionManager.stopListening()
             voiceCaptureInProgress = false
+            pendingWakeCommand = ""
             softWaitToneEngine.stop()
             markState(
                 voiceState = VoiceState.Idle,
@@ -605,6 +611,7 @@ class AssistantController @Inject constructor(
     private fun forceStopOutput(cancelProcessingJob: Boolean = true) {
         isSpeaking = false
         voiceCaptureInProgress = false
+        pendingWakeCommand = ""
         softWaitToneEngine.stop()
         cancelScheduledListen()
         if (cancelProcessingJob) {
@@ -627,10 +634,11 @@ class AssistantController @Inject constructor(
     }
 
     /**
-     * Vosk detectó «Lázaro» → pausar Vosk, esperar mic, abrir Google STT para el comando.
+     * Vosk detectó «Lázaro» → si ya trae comando, ejecutarlo; si no, abrir Google STT.
      */
-    private fun onWakeWordDetected() {
+    private fun onWakeWordDetected(commandFromWake: String) {
         if (!isActive) return
+        val spokenCommand = stripBareWakeFollowup(commandFromWake)
         if (sleepModeController.isSleeping()) {
             // Solo llega aquí si Vosk vio «Lázaro despierta»
             scope?.launch { exitSleepMode() }
@@ -640,7 +648,10 @@ class AssistantController @Inject constructor(
         if (now - lastWakeHandledMs < WAKE_DEBOUNCE_MS) return
         lastWakeHandledMs = now
 
-        if (voiceCaptureInProgress &&
+        Log.i("Lazaro", "wake detected cmd='${spokenCommand.take(80)}'")
+
+        if (spokenCommand.isBlank() &&
+            voiceCaptureInProgress &&
             speechRecognitionManager.isActive() &&
             !isSpeaking &&
             processingJob?.isActive != true
@@ -679,9 +690,18 @@ class AssistantController @Inject constructor(
         speechRecognitionManager.stopListening()
 
         wakeWordNotifier.playActivationSound()
-        wakeWordController.pauseForCommand() // para Vosk ya
+        wakeWordController.pauseForCommand()
         resetCounters()
         listenProfile = ListeningProfile.DIRECT_RESPONSE
+
+        if (spokenCommand.isNotBlank()) {
+            pendingWakeCommand = ""
+            voiceCaptureInProgress = false
+            scope?.launch { dispatchCommand(spokenCommand) }
+            return
+        }
+
+        pendingWakeCommand = ""
         voiceCaptureInProgress = true
         markState(
             voiceState = VoiceState.Listening,
@@ -694,8 +714,22 @@ class AssistantController @Inject constructor(
         scope?.launch {
             delay(MIC_HANDOFF_DELAY_MS)
             if (!isActive || listeningSuspended || isSpeaking) return@launch
+            if (sleepModeController.isSleeping()) return@launch
             startDirectListening(force = true, skipPause = true)
         }
+    }
+
+    /** «despierta» solo tras el wake no es un comando útil si ya estamos despiertos. */
+    private fun stripBareWakeFollowup(command: String): String {
+        val t = command.trim()
+        if (t.isBlank()) return ""
+        val n = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+            .replace(Regex("[^a-z0-9ñ\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (n == "despierta" || n == "despertar" || n == "despiertate") return ""
+        return t
     }
 
     private fun startDirectListening(force: Boolean = false, skipPause: Boolean = false) {
@@ -808,13 +842,24 @@ class AssistantController @Inject constructor(
         }
     }
 
+    private fun consumePendingWakeCommand(): String {
+        val cmd = stripBareWakeFollowup(pendingWakeCommand)
+        pendingWakeCommand = ""
+        return cmd
+    }
+
     private suspend fun handleSpeechResult(rawText: String) {
         voiceCaptureInProgress = false
         silentRetries = 0
 
         val text = rawText.trim()
+        val fallback = consumePendingWakeCommand()
         Log.i("Lazaro", "handleSpeechResult: ${text.take(100)}")
         if (text.isBlank()) {
+            if (fallback.isNotBlank()) {
+                dispatchCommand(fallback)
+                return
+            }
             if (!sleepModeController.isSleeping()) {
                 returnToStandby(delayMs = 0L)
             }
@@ -871,6 +916,10 @@ class AssistantController @Inject constructor(
 
         val wakeMatch = WakeWordDetector.parse(text)
         if (wakeMatch.detected && wakeMatch.command.isBlank()) {
+            if (fallback.isNotBlank()) {
+                dispatchCommand(fallback)
+                return
+            }
             listenProfile = ListeningProfile.DIRECT_RESPONSE
             startDirectListening(force = true, skipPause = true)
             return
@@ -878,6 +927,10 @@ class AssistantController @Inject constructor(
 
         val command = resolveCommandText(text, wakeMatch)
         if (command.isBlank()) {
+            if (fallback.isNotBlank()) {
+                dispatchCommand(fallback)
+                return
+            }
             startDirectListening(force = true, skipPause = true)
             return
         }
@@ -960,6 +1013,12 @@ class AssistantController @Inject constructor(
     private suspend fun handleSpeechError(message: String, isSilent: Boolean) {
         voiceCaptureInProgress = false
         if (isSpeaking || processingJob?.isActive == true) return
+
+        val fallback = consumePendingWakeCommand()
+        if (fallback.isNotBlank()) {
+            dispatchCommand(fallback)
+            return
+        }
 
         // Como el modo Vosk estable: errores silenciosos no hablan «No te he oído»
         if (isSilent) {
@@ -1579,15 +1638,30 @@ class AssistantController @Inject constructor(
                 elapsed > 2_500L -> {
                 startDirectListening(force = true, skipPause = true)
             }
-            state == VoiceState.Listening && voiceCaptureInProgress -> Unit
+            // Tras «Lázaro»: no ignorar STT muerto solo porque voiceCaptureInProgress siga true.
             state == VoiceState.Listening &&
-                !speechRecognitionManager.isActive() &&
-                resumeListeningJob?.isActive != true &&
                 processingJob?.isActive != true &&
                 !isSpeaking &&
                 !listeningSuspended &&
-                !voiceCaptureInProgress &&
+                elapsed > 2_500L &&
+                !speechRecognitionManager.isActive() -> {
+                if (elapsed > STUCK_LISTENING_MS) {
+                    voiceCaptureInProgress = false
+                    pendingWakeCommand = ""
+                    resumeListening(directAfter = actionExecutor.hasPendingConfirmation())
+                } else {
+                    startDirectListening(force = true, skipPause = true)
+                }
+            }
+            state == VoiceState.Listening &&
+                speechRecognitionManager.isActive() &&
+                processingJob?.isActive != true &&
+                !isSpeaking &&
+                !listeningSuspended &&
                 elapsed > STUCK_LISTENING_MS -> {
+                voiceCaptureInProgress = false
+                pendingWakeCommand = ""
+                speechRecognitionManager.stopListening()
                 resumeListening(directAfter = actionExecutor.hasPendingConfirmation())
             }
             // Vosk caído en standby

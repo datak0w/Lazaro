@@ -10,6 +10,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +39,8 @@ class SpeechRecognitionManager @Inject constructor(
     private var speechRecognizer: SpeechRecognizer? = null
     private var listeningMode: ListeningMode? = null
     private var isListening = false
+    private val sessionId = AtomicInteger(0)
+    private var listenerSessionId = 0
 
     private var onResultCallback: ((String) -> Unit)? = null
     private var onErrorCallback: ((message: String, silent: Boolean) -> Unit)? = null
@@ -58,13 +61,9 @@ class SpeechRecognitionManager @Inject constructor(
             onError("Reconocimiento de voz no disponible en este dispositivo.", false)
             return
         }
-
-        stopListening()
-        listeningMode = ListeningMode.ACTIVE_COMMAND
-        onResultCallback = onResult
-        onErrorCallback = onError
-        lastPartial = ""
-        startSession(ListeningMode.ACTIVE_COMMAND)
+        runOnMain {
+            beginListening(ListeningMode.ACTIVE_COMMAND, onResult, onError)
+        }
     }
 
     fun startDirectResponseListening(
@@ -75,16 +74,38 @@ class SpeechRecognitionManager @Inject constructor(
             onError("Reconocimiento de voz no disponible en este dispositivo.", false)
             return
         }
-
-        stopListening()
-        listeningMode = ListeningMode.DIRECT_RESPONSE
-        onResultCallback = onResult
-        onErrorCallback = onError
-        lastPartial = ""
-        startSession(ListeningMode.DIRECT_RESPONSE)
+        runOnMain {
+            beginListening(ListeningMode.DIRECT_RESPONSE, onResult, onError)
+        }
     }
 
     fun stopListening() {
+        runOnMain { stopListeningInternal(destroy = false) }
+    }
+
+    fun releaseRecognizer() {
+        runOnMain { stopListeningInternal(destroy = true) }
+    }
+
+    fun shutdown() {
+        releaseRecognizer()
+    }
+
+    private fun beginListening(
+        mode: ListeningMode,
+        onResult: (String) -> Unit,
+        onError: (message: String, silent: Boolean) -> Unit,
+    ) {
+        stopListeningInternal(destroy = true)
+        listeningMode = mode
+        onResultCallback = onResult
+        onErrorCallback = onError
+        lastPartial = ""
+        startSession(mode)
+    }
+
+    private fun stopListeningInternal(destroy: Boolean) {
+        sessionId.incrementAndGet()
         listeningMode = null
         isListening = false
         onResultCallback = null
@@ -94,27 +115,23 @@ class SpeechRecognitionManager @Inject constructor(
             speechRecognizer?.cancel()
         } catch (_: Exception) {
         }
+        if (destroy) {
+            try {
+                speechRecognizer?.destroy()
+            } catch (_: Exception) {
+            }
+            speechRecognizer = null
+        }
         _partialText.value = ""
         _audioLevel.value = 0f
-    }
-
-    fun releaseRecognizer() {
-        stopListening()
-        try {
-            speechRecognizer?.destroy()
-        } catch (_: Exception) {
-        }
-        speechRecognizer = null
-    }
-
-    fun shutdown() {
-        releaseRecognizer()
     }
 
     private fun startSession(mode: ListeningMode) {
         if (listeningMode != mode) return
         isListening = true
-        ensureRecognizer()
+        val id = sessionId.incrementAndGet()
+        listenerSessionId = id
+        ensureRecognizer(id)
         try {
             speechRecognizer?.startListening(buildIntent(mode))
         } catch (e: Exception) {
@@ -128,12 +145,26 @@ class SpeechRecognitionManager @Inject constructor(
         }
     }
 
-    private fun ensureRecognizer() {
-        if (speechRecognizer != null) return
+    private fun ensureRecognizer(id: Int) {
+        try {
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {
+        }
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-            setRecognitionListener(recognitionListener)
+            setRecognitionListener(newListener(id))
         }
     }
+
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            mainHandler.post(block)
+        }
+    }
+
+    private fun isCurrentSession(id: Int): Boolean =
+        id == listenerSessionId && id == sessionId.get()
 
     private fun buildIntent(mode: ListeningMode): Intent {
         val silenceMs = when (mode) {
@@ -155,8 +186,9 @@ class SpeechRecognitionManager @Inject constructor(
         }
     }
 
-    private val recognitionListener = object : RecognitionListener {
+    private fun newListener(id: Int) = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
+            if (!isCurrentSession(id)) return
             _partialText.value = ""
             lastPartial = ""
         }
@@ -164,6 +196,7 @@ class SpeechRecognitionManager @Inject constructor(
         override fun onBeginningOfSpeech() = Unit
 
         override fun onRmsChanged(rmsdB: Float) {
+            if (!isCurrentSession(id)) return
             val normalized = ((rmsdB + 2f) / 10f).coerceIn(0f, 1f)
             _audioLevel.value = normalized
         }
@@ -173,6 +206,7 @@ class SpeechRecognitionManager @Inject constructor(
         override fun onEndOfSpeech() = Unit
 
         override fun onError(error: Int) {
+            if (!isCurrentSession(id)) return
             if (listeningMode == null && onErrorCallback == null && onResultCallback == null) {
                 return
             }
@@ -210,8 +244,7 @@ class SpeechRecognitionManager @Inject constructor(
         }
 
         override fun onResults(results: Bundle?) {
-            // Capturar callbacks ANTES de tocar el recognizer.
-            // No llamar cancel() aquí: en Samsung provoca onError y pierde el resultado.
+            if (!isCurrentSession(id)) return
             val resultCb = onResultCallback
             val errorCb = onErrorCallback
             isListening = false
@@ -243,6 +276,7 @@ class SpeechRecognitionManager @Inject constructor(
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
+            if (!isCurrentSession(id)) return
             val text = partialResults
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()

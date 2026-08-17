@@ -75,31 +75,9 @@ class SleepModeController @Inject constructor(
         return if (_sleeping.value) DoubleVolumeResult.EXIT_SLEEP else DoubleVolumeResult.ENTER_SLEEP
     }
 
-    fun isSleepCommand(userText: String): Boolean {
-        val t = normalize(userText)
-        if (t.isBlank()) return false
-        return SLEEP_PHRASES.any { t.contains(it) } ||
-            (t.contains("dormir") && (t.contains("modo") || t.contains("ve ") || t.startsWith("a "))) ||
-            t == "duerme" ||
-            t == "a dormir" ||
-            t.endsWith(" a dormir") ||
-            t.startsWith("duerme ")
-    }
+    fun isSleepCommand(userText: String): Boolean = matchesSleepCommand(userText)
 
-    fun isWakeFromSleepPhrase(userText: String): Boolean {
-        val compact = normalize(userText)
-            .replace(" ", "")
-            .replace("'", "")
-        val hasLazaro = compact.contains("lazaro") ||
-            compact.contains("lasaro") ||
-            compact.contains("lazzaro") ||
-            compact.contains("lazarro") ||
-            compact.contains("hazaro")
-        val hasWake = compact.contains("despierta") ||
-            compact.contains("despiertate") ||
-            compact.contains("despertar")
-        return hasLazaro && hasWake
-    }
+    fun isWakeFromSleepPhrase(userText: String): Boolean = matchesWakeFromSleep(userText)
 
     companion object {
         private val KEY_SLEEPING = booleanPreferencesKey("sleeping")
@@ -120,6 +98,32 @@ class SleepModeController @Inject constructor(
             "apagate",
             "callate y duerme",
         )
+
+        fun matchesSleepCommand(userText: String): Boolean {
+            val t = normalize(userText)
+            if (t.isBlank()) return false
+            return SLEEP_PHRASES.any { t.contains(it) } ||
+                (t.contains("dormir") && (t.contains("modo") || t.contains("ve ") || t.startsWith("a "))) ||
+                t == "duerme" ||
+                t == "a dormir" ||
+                t.endsWith(" a dormir") ||
+                t.startsWith("duerme ")
+        }
+
+        fun matchesWakeFromSleep(userText: String): Boolean {
+            val compact = normalize(userText)
+                .replace(" ", "")
+                .replace("'", "")
+            val hasLazaro = compact.contains("lazaro") ||
+                compact.contains("lasaro") ||
+                compact.contains("lazzaro") ||
+                compact.contains("lazarro") ||
+                compact.contains("hazaro")
+            val hasWake = compact.contains("despierta") ||
+                compact.contains("despiertate") ||
+                compact.contains("despertar")
+            return hasLazaro && hasWake
+        }
 
         private fun normalize(raw: String): String {
             val n = Normalizer.normalize(raw.lowercase().trim(), Normalizer.Form.NFD)

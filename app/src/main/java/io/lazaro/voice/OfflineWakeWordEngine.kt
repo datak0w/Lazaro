@@ -1,6 +1,8 @@
 package io.lazaro.voice
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,9 +30,11 @@ class OfflineWakeWordEngine @Inject constructor(
     private var loadedModelPath: String? = null
     private var speechService: SpeechService? = null
     private val running = AtomicBoolean(false)
-    private var onWakeWord: (() -> Unit)? = null
+    private var onWakeWord: ((String) -> Unit)? = null
     private var onErrorCallback: ((String) -> Unit)? = null
     private var lastDetectionMs = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingWakeFire: Runnable? = null
 
     /** En modo dormir solo dispara con «Lázaro despierta», no con «Lázaro» solo. */
     @Volatile
@@ -51,9 +55,10 @@ class OfflineWakeWordEngine @Inject constructor(
 
     suspend fun start(
         modelPath: String,
-        onDetected: () -> Unit,
+        onDetected: (command: String) -> Unit,
         onError: (String) -> Unit,
     ) = withContext(Dispatchers.IO) {
+        cancelPendingWakeFire()
         onWakeWord = onDetected
         onErrorCallback = onError
         stopInternal()
@@ -80,12 +85,14 @@ class OfflineWakeWordEngine @Inject constructor(
         // Cortar callbacks ANTES de stop interno para no re-disparar wake
         // (partial+final del mismo «Lázaro» tras pause).
         running.set(false)
+        cancelPendingWakeFire()
         onWakeWord = null
         stopInternal()
     }
 
     fun shutdown() {
         running.set(false)
+        cancelPendingWakeFire()
         stopInternal()
         releaseModel()
         onWakeWord = null
@@ -126,15 +133,15 @@ class OfflineWakeWordEngine @Inject constructor(
 
     private val recognitionListener = object : RecognitionListener {
         override fun onPartialResult(hypothesis: String?) {
-            handleHypothesis(hypothesis)
+            handleHypothesis(hypothesis, isEndpoint = false)
         }
 
         override fun onResult(hypothesis: String?) {
-            handleHypothesis(hypothesis)
+            handleHypothesis(hypothesis, isEndpoint = true)
         }
 
         override fun onFinalResult(hypothesis: String?) {
-            handleHypothesis(hypothesis)
+            handleHypothesis(hypothesis, isEndpoint = true)
         }
 
         override fun onError(exception: Exception?) {
@@ -152,21 +159,58 @@ class OfflineWakeWordEngine @Inject constructor(
         }
     }
 
-    private fun handleHypothesis(hypothesis: String?) {
+    private fun handleHypothesis(hypothesis: String?, isEndpoint: Boolean) {
         if (!running.get() || hypothesis.isNullOrBlank()) return
-        val callback = onWakeWord ?: return
+        if (onWakeWord == null) return
 
         val text = extractText(hypothesis)
         if (text.isBlank() || text == "[unk]") return
         if (!matchesWakeHypothesis(text)) return
 
+        if (sleepMode) {
+            fireWakeDetection("")
+            return
+        }
+
+        val command = WakeWordDetector.parse(text).command.trim()
+        if (command.isNotBlank()) {
+            fireWakeDetection(command)
+            return
+        }
+
+        // «Lázaro» solo: no cortar el mic en el parcial o se pierde el comando.
+        if (isEndpoint) {
+            fireWakeDetection("")
+            return
+        }
+        scheduleWakeOnlyFire()
+    }
+
+    private fun scheduleWakeOnlyFire() {
+        if (pendingWakeFire != null) return
+        val runnable = Runnable {
+            pendingWakeFire = null
+            fireWakeDetection("")
+        }
+        pendingWakeFire = runnable
+        mainHandler.postDelayed(runnable, PARTIAL_WAKE_HOLD_MS)
+    }
+
+    private fun fireWakeDetection(command: String) {
+        cancelPendingWakeFire()
+        if (!running.get()) return
+        val callback = onWakeWord ?: return
         val now = System.currentTimeMillis()
         if (now - lastDetectionMs < DETECTION_COOLDOWN_MS) return
         lastDetectionMs = now
-
         // Un solo disparo por detección; evita 2º wake que corta el STT pendiente
         onWakeWord = null
-        callback.invoke()
+        callback.invoke(command)
+    }
+
+    private fun cancelPendingWakeFire() {
+        pendingWakeFire?.let { mainHandler.removeCallbacks(it) }
+        pendingWakeFire = null
     }
 
     private fun matchesWakeHypothesis(text: String): Boolean {
@@ -218,6 +262,8 @@ class OfflineWakeWordEngine @Inject constructor(
         private const val MODEL_URL =
             "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"
         private const val DETECTION_COOLDOWN_MS = 4_000L
+        /** Esperar a que Vosk acumule «Lázaro + comando» antes de ceder el mic. */
+        private const val PARTIAL_WAKE_HOLD_MS = 800L
 
         private fun isValidModel(modelRoot: File): Boolean {
             return File(modelRoot, "conf/model.conf").exists() &&
