@@ -124,8 +124,10 @@ class PathGuideController @Inject constructor(
                 }
                 val streetGuide = _mode.value == PathGuideMode.PASEO ||
                     _mode.value == PathGuideMode.DEBUG ||
-                    _mode.value == PathGuideMode.GRABANDO
-                // En calle: no callar por TTS genérico; solo Maps o anuncio activo.
+                    _mode.value == PathGuideMode.GRABANDO ||
+                    _mode.value == PathGuideMode.NAVEGACION ||
+                    _mode.value == PathGuideMode.RUTA
+                // En calle: ducking solo por Maps/anuncios, no por cualquier TTS.
                 stereoBeepEngine.setPaused(
                     announcing ||
                         (streetGuide && navigationAudioCoordinator.shouldDuckBeeps()) ||
@@ -207,7 +209,10 @@ class PathGuideController @Inject constructor(
         if (mode == PathGuideMode.RUTA && routeId != null) {
             routeReplayBrain.loadRoute(routeId)
         }
-        if (mode == PathGuideMode.GRABANDO || mode == PathGuideMode.RUTA) {
+        if (mode == PathGuideMode.GRABANDO ||
+            mode == PathGuideMode.RUTA ||
+            mode == PathGuideMode.NAVEGACION
+        ) {
             bindHighAccuracyLocation()
         }
 
@@ -217,15 +222,22 @@ class PathGuideController @Inject constructor(
             mode == PathGuideMode.RUTA ||
             mode == PathGuideMode.DEBUG ||
             mode == PathGuideMode.GRABANDO
-        // Paseo y navegación: arnés automático (Pixel en clip/POV + profundidad).
-        val autoHarness = mode == PathGuideMode.PASEO || mode == PathGuideMode.NAVEGACION
+        // Paseo: arnés automático. Navegación: CameraX estable (ARCore solo si el usuario
+        // tiene profundidad y el host confirma frames; evita debug negro / nav muda).
+        val autoHarness = mode == PathGuideMode.PASEO
         if (autoHarness && !config.harnessMountMode) {
             repository.setHarnessMountMode(true)
             config = config.copy(harnessMountMode = true, depthEnhancedGuidance = true)
         }
         val harnessActive = config.harnessMountMode || autoHarness
-        // Modo arnés: siempre pedir profundidad (ARCore/LDAF si el hardware la tiene).
-        val depthWanted = streetMode && (config.depthEnhancedGuidance || harnessActive)
+        // Navegación/ruta: preferir monocular fiable salvo que profundidad ya esté activa.
+        val depthWanted = when (mode) {
+            PathGuideMode.PASEO, PathGuideMode.DEBUG, PathGuideMode.GRABANDO ->
+                config.depthEnhancedGuidance || harnessActive
+            PathGuideMode.NAVEGACION, PathGuideMode.RUTA ->
+                config.depthEnhancedGuidance && !autoHarness
+            else -> false
+        }
         depthHardwareDetector.invalidateCache()
         val depthCaps = depthHardwareDetector.detect(depthWanted)
         lastDepthGuidanceMode = depthCaps.mode
@@ -244,8 +256,12 @@ class PathGuideController @Inject constructor(
 
         val started = pathGuideCameraHost.start(depthWanted)
         if (!started) {
+            Log.e(TAG, "Cámara PathGuide no arrancó (mode=$mode)")
             stop()
             return false
+        }
+        if (!pathGuideCameraHost.hasRecentFrames(3_000L)) {
+            Log.w(TAG, "Cámara arrancó sin frames recientes (mode=$mode)")
         }
         pathGuideCameraHost.activeCapabilities()?.let { caps ->
             lastDepthGuidanceMode = caps.mode

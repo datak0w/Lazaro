@@ -1200,8 +1200,15 @@ class AssistantController @Inject constructor(
                     }
                     scope?.launch {
                         val mode = pathGuideController.currentMode()
-                        if (mode != PathGuideMode.RUTA && mode != PathGuideMode.NAVEGACION) {
-                            pathGuideController.start(PathGuideMode.NAVEGACION)
+                        if (mode == PathGuideMode.RUTA) return@launch
+                        if (mode != PathGuideMode.NAVEGACION) {
+                            val camOk = pathGuideController.start(PathGuideMode.NAVEGACION)
+                            if (!camOk) {
+                                speakOnly(
+                                    "No pude abrir la cámara para guiarte. " +
+                                        "Comprueba el permiso de cámara e inténtalo otra vez.",
+                                )
+                            }
                         }
                     }
                     enterNavigationPause()

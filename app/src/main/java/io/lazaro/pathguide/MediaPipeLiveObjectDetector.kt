@@ -12,14 +12,15 @@ import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetectorResult
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Object Detector MediaPipe en [RunningMode.LIVE_STREAM] sobre frames de PathGuide.
- * No bloquea el hilo UI; ignora frames si el detector está ocupado.
+ * Object Detector MediaPipe en [RunningMode.LIVE_STREAM].
+ * Corre fuera del hilo del analyzer de CameraX para no tumbar frames/debug.
  */
 @Singleton
 class MediaPipeLiveObjectDetector @Inject constructor(
@@ -30,8 +31,14 @@ class MediaPipeLiveObjectDetector @Inject constructor(
     private val started = AtomicBoolean(false)
     private val inFlight = AtomicBoolean(false)
     private val latest = AtomicReference<List<PedestrianDetection>>(emptyList())
+    private val pendingBitmap = AtomicReference<Bitmap?>(null)
+    private val executor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "MpObjectDetect").apply { isDaemon = true }
+    }
+
     @Volatile
     private var lastSubmitElapsedMs = 0L
+
     @Volatile
     private var lastTimestampMs = 0L
 
@@ -55,6 +62,7 @@ class MediaPipeLiveObjectDetector @Inject constructor(
                         handleResult(result, inputImage)
                     }
                     .setErrorListener { error ->
+                        recyclePendingBitmap()
                         inFlight.set(false)
                         Log.w(TAG, "MediaPipe object detector: ${error.message}")
                     }
@@ -89,8 +97,8 @@ class MediaPipeLiveObjectDetector @Inject constructor(
         PedestrianObjectMapper.frontalBeepBoost(latest.get())
 
     /**
-     * Envía un frame si ha pasado el intervalo y el detector está libre.
-     * [image] en color (CameraX) es preferible; si es null usa el gris (ARCore).
+     * Copia el gray y procesa en background. No usa [ImageProxy] (evita JPEG pesado
+     * y conflictos de ciclo de vida en el analyzer).
      */
     fun submitFrame(
         image: ImageProxy?,
@@ -98,53 +106,52 @@ class MediaPipeLiveObjectDetector @Inject constructor(
         width: Int,
         height: Int,
     ) {
-        if (!started.get()) return
+        if (!started.get() || detector == null) return
         val elapsed = SystemClock.elapsedRealtime()
         if (elapsed - lastSubmitElapsedMs < MIN_INTERVAL_MS) return
         if (!inFlight.compareAndSet(false, true)) return
         lastSubmitElapsedMs = elapsed
 
-        val bitmap = try {
-            if (image != null) {
-                YuvToRgbConverter.imageProxyToBitmap(image, maxSide = INPUT_MAX_SIDE)
-            } else {
-                GrayBitmapConverter.toBitmap(gray, width, height, maxSide = INPUT_MAX_SIDE)
-            }
+        // Copia inmediata: el gray del analyzer puede reutilizarse.
+        val grayCopy = try {
+            gray.copyOf()
         } catch (e: Exception) {
             inFlight.set(false)
-            Log.w(TAG, "Conversión de frame falló", e)
             return
         }
-        if (bitmap == null) {
-            inFlight.set(false)
-            return
+        // image no se usa en background (puede cerrarse en finally del controller).
+        executor.execute {
+            runDetection(grayCopy, width, height)
         }
+    }
 
-        val detectorRef = detector
-        if (detectorRef == null) {
-            recycleQuietly(bitmap)
-            inFlight.set(false)
-            return
-        }
-
-        val timestampMs = monotonicTimestamp()
-        val mpImage = try {
-            BitmapImageBuilder(bitmap).build()
-        } catch (e: Exception) {
-            recycleQuietly(bitmap)
-            inFlight.set(false)
-            Log.w(TAG, "BitmapImageBuilder falló", e)
-            return
-        } finally {
-            recycleQuietly(bitmap)
-        }
-
+    private fun runDetection(gray: ByteArray, width: Int, height: Int) {
+        var bitmap: Bitmap? = null
+        var mpImage: MPImage? = null
         try {
-            detectorRef.detectAsync(mpImage, timestampMs)
+            bitmap = GrayBitmapConverter.toBitmap(gray, width, height, maxSide = INPUT_MAX_SIDE)
+            if (bitmap == null) {
+                inFlight.set(false)
+                return
+            }
+            val detectorRef = detector
+            if (detectorRef == null) {
+                recycleQuietly(bitmap)
+                inFlight.set(false)
+                return
+            }
+            // Ownership: MediaPipe puede leer el bitmap hasta el result/error listener.
+            pendingBitmap.set(bitmap)
+            mpImage = BitmapImageBuilder(bitmap).build()
+            bitmap = null
+            detectorRef.detectAsync(mpImage, monotonicTimestamp())
+            mpImage = null
         } catch (e: Exception) {
             inFlight.set(false)
-            closeQuietly(mpImage)
             Log.w(TAG, "detectAsync falló", e)
+            closeQuietly(mpImage)
+            recycleQuietly(bitmap)
+            recyclePendingBitmap()
         }
     }
 
@@ -171,8 +178,13 @@ class MediaPipeLiveObjectDetector @Inject constructor(
             Log.w(TAG, "Error interpretando detecciones", e)
         } finally {
             closeQuietly(inputImage)
+            recyclePendingBitmap()
             inFlight.set(false)
         }
+    }
+
+    private fun recyclePendingBitmap() {
+        recycleQuietly(pendingBitmap.getAndSet(null))
     }
 
     private fun monotonicTimestamp(): Long {
@@ -191,14 +203,16 @@ class MediaPipeLiveObjectDetector @Inject constructor(
         detector = null
     }
 
-    private fun recycleQuietly(bitmap: Bitmap) {
+    private fun recycleQuietly(bitmap: Bitmap?) {
+        if (bitmap == null) return
         try {
             if (!bitmap.isRecycled) bitmap.recycle()
         } catch (_: Exception) {
         }
     }
 
-    private fun closeQuietly(image: MPImage) {
+    private fun closeQuietly(image: MPImage?) {
+        if (image == null) return
         try {
             image.close()
         } catch (_: Exception) {
@@ -209,7 +223,7 @@ class MediaPipeLiveObjectDetector @Inject constructor(
         private const val TAG = "MpObjectDetector"
         const val MODEL_ASSET = "efficientdet_lite0.tflite"
         private const val SCORE_THRESHOLD = 0.38f
-        private const val MIN_INTERVAL_MS = 130L
+        private const val MIN_INTERVAL_MS = 160L
         private const val INPUT_MAX_SIDE = 320
     }
 }

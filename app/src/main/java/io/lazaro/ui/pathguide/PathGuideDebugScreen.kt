@@ -84,7 +84,9 @@ fun PathGuideDebugScreen(
         ) {
             if (debugState == null) {
                 Text(
-                    "Esperando cámara… Modo: $mode",
+                    "Esperando cámara… Modo: $mode. " +
+                        "Si no aparece imagen en unos segundos, comprueba el permiso de cámara " +
+                        "y que otra app no esté usando la cámara.",
                     style = MaterialTheme.typography.bodyLarge,
                 )
             } else {

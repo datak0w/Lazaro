@@ -173,6 +173,7 @@ class NavigationAction @Inject constructor(
 @Singleton
 class LocationAction @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val nearbyLandmarkRepository: io.lazaro.location.NearbyLandmarkRepository,
 ) {
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
 
@@ -204,13 +205,20 @@ class LocationAction @Inject constructor(
                 )
 
             val addressLine = reverseGeocodeFast(location.latitude, location.longitude)
-            if (addressLine.isNullOrBlank()) {
-                ActionResult.Success(
-                    "Estás en las coordenadas ${location.latitude}, ${location.longitude}.",
-                )
+            val landmarks = nearbyLandmarkRepository.findNearby(
+                location.latitude,
+                location.longitude,
+            )
+            val landmarkLine = nearbyLandmarkRepository.formatSpokenLine(landmarks)
+
+            val base = if (addressLine.isNullOrBlank()) {
+                "Estás en las coordenadas ${"%.5f".format(location.latitude)}, " +
+                    "${"%.5f".format(location.longitude)}."
             } else {
-                ActionResult.Success("Estás cerca de $addressLine.")
+                "Estás cerca de $addressLine."
             }
+            val spoken = if (landmarkLine.isNullOrBlank()) base else "$base $landmarkLine"
+            ActionResult.Success(spoken)
         } catch (e: SecurityException) {
             ActionResult.Error("Necesito permiso de ubicación para decirte dónde estás.")
         } catch (e: Exception) {

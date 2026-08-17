@@ -16,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -47,6 +49,7 @@ class OwnNavigationGuide @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val active = AtomicBoolean(false)
     private var loopJob: Job? = null
+    private var gpsJob: Job? = null
     private var target: NavigationTarget? = null
     private var destLat: Double? = null
     private var destLng: Double? = null
@@ -87,6 +90,7 @@ class OwnNavigationGuide @Inject constructor(
         resetRouteState()
         active.set(true)
         deviceRotationTracker.start()
+        bindGpsStream()
         loopJob = scope.launch { runGuideLoop(announceInitial = true) }
     }
 
@@ -101,6 +105,7 @@ class OwnNavigationGuide @Inject constructor(
         if (active.get() && loopJob?.isActive == true) return
         active.set(true)
         deviceRotationTracker.start()
+        bindGpsStream()
         loopJob = scope.launch { runGuideLoop(announceInitial = false) }
     }
 
@@ -108,10 +113,19 @@ class OwnNavigationGuide @Inject constructor(
         active.set(false)
         loopJob?.cancel()
         loopJob = null
+        gpsJob?.cancel()
+        gpsJob = null
         target = null
         destLat = null
         destLng = null
         resetRouteState()
+    }
+
+    private fun bindGpsStream() {
+        if (gpsJob?.isActive == true) return
+        gpsJob = highAccuracyLocationProvider.fixes(intervalMs = 1_000L)
+            .onEach { /* alimenta lastGoodFix vía provider */ }
+            .launchIn(scope)
     }
 
     private fun resetRouteState() {
@@ -217,15 +231,35 @@ class OwnNavigationGuide @Inject constructor(
         var lat = destLat
         var lng = destLng
         if (lat == null || lng == null) {
-            val geo = geocodeNear(label) ?: return
+            val geo = geocodeNear(label)
+            if (geo == null) {
+                Log.w(TAG, "No pude geocodificar destino=$label")
+                speakTip(
+                    "No encuentro la dirección de $label. " +
+                        "Camina con cuidado; di para cuando quieras terminar.",
+                )
+                return
+            }
             lat = geo.first
             lng = geo.second
             destLat = lat
             destLng = lng
         }
         val origin = resolveGuideOrigin()
-            ?: return
+        if (origin == null) {
+            Log.w(TAG, "Sin GPS para planificar ruta a $label")
+            speakTip(
+                "Aún no tengo buena ubicación GPS. Sal un momento al exterior " +
+                    "o espera unos segundos. Te guiaré en cuanto pueda.",
+            )
+            return
+        }
         fetchAndApplyPlan(origin.latitude, origin.longitude, lat, lng, label)
+        if (routePlan == null) {
+            speakTip(
+                "No pude calcular la ruta ahora. Te oriento por rumbo hacia $label.",
+            )
+        }
     }
 
     private suspend fun fetchAndApplyPlan(
@@ -710,12 +744,12 @@ class OwnNavigationGuide @Inject constructor(
     private fun mapsBlocksHeading(): Boolean = false
 
     private suspend fun resolveGuideOrigin(): LocationAction.UserLocation? {
+        // Preferir stream HIGH_ACCURACY; aceptar hasta 40 m al inicio para no quedarnos mudos.
         val hi = highAccuracyLocationProvider.lastFixCached()
             ?: highAccuracyLocationProvider.lastFix()
-        if (hi != null && hi.accuracyM <= MAX_GPS_ACCURACY_M) {
+        if (hi != null && hi.accuracyM <= MAX_GPS_ACCURACY_START_M) {
             return LocationAction.UserLocation(hi.lat, hi.lng)
         }
-        // Mantener último buen fix del proveedor si el actual es malo
         val cached = highAccuracyLocationProvider.lastGoodFix()
         if (cached != null) {
             return LocationAction.UserLocation(cached.lat, cached.lng)
@@ -804,6 +838,7 @@ class OwnNavigationGuide @Inject constructor(
         private const val CROSSING_HINT_RADIUS_M = 80.0
         private const val CROSSING_COOLDOWN_MS = 50_000L
         private const val MAX_GPS_ACCURACY_M = 25f
+        private const val MAX_GPS_ACCURACY_START_M = 40f
         private const val STREET_SIDE_COOLDOWN_MS = 90_000L
         private val DISTANCE_MILESTONES = listOf(200, 100, 50, 25)
     }

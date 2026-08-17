@@ -33,6 +33,9 @@ class PathGuideDebugViewModel @Inject constructor(
             if (current == PathGuideMode.OFF) {
                 val started = pathGuideController.start(PathGuideMode.DEBUG)
                 startedDebugHere = started
+                if (!started) {
+                    android.util.Log.e("PathGuideDebugVM", "No se pudo iniciar preview DEBUG")
+                }
             }
         }
     }
