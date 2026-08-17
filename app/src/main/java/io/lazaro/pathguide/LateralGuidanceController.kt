@@ -295,17 +295,17 @@ class LateralGuidanceController {
     }
 
     companion object {
-        const val DEADBAND = 0.16f
-        const val ENTER_SILENCE = 0.14f
-        const val EXIT_SILENCE = 0.18f
-        const val FRONTAL_INSISTENT_M = 3.0f
-        const val FRONTAL_SEVERITY_INSISTENT = 0.38f
+        const val DEADBAND = 0.20f
+        const val ENTER_SILENCE = 0.20f
+        const val EXIT_SILENCE = 0.24f
+        const val FRONTAL_INSISTENT_M = 2.6f
+        const val FRONTAL_SEVERITY_INSISTENT = 0.42f
 
         /** Proximidad lateral que dispara pitido (parado / andando recto). */
-        const val WALL_ACTIVATE = 0.36f
+        const val WALL_ACTIVATE = 0.48f
 
         /** Más sensible al girar (la imagen falla). */
-        const val WALL_ACTIVATE_TURNING = 0.28f
+        const val WALL_ACTIVATE_TURNING = 0.36f
 
         /** |yaw rate| por encima → modo giro (visión menos fiable). */
         const val TURN_RATE_DEG_S = 28f

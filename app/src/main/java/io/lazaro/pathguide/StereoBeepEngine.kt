@@ -460,10 +460,10 @@ class StereoBeepEngine @Inject constructor(
         private const val CHANNEL_LEFT = 0
         private const val CHANNEL_RIGHT = 1
         private const val CHANNEL_NONE = -1
-        private const val BEEP_THRESHOLD = 0.12f
-        private const val DOORWAY_BEEP_THRESHOLD = 0.14f
-        private const val CONTINUOUS_THRESHOLD = 0.08f
-        private const val GUIDANCE_THRESHOLD = 0.05f
+        private const val BEEP_THRESHOLD = 0.18f
+        private const val DOORWAY_BEEP_THRESHOLD = 0.16f
+        private const val CONTINUOUS_THRESHOLD = 0.14f
+        private const val GUIDANCE_THRESHOLD = 0.12f
         private const val CONTINUOUS_SWITCH_MARGIN = 0.14f
         private const val CONTINUOUS_HOLD_MS = 850L
         private const val GUIDANCE_HOLD_MS = 550L

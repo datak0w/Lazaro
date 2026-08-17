@@ -27,7 +27,7 @@ data class PedestrianDetection(
 
 object PedestrianObjectMapper {
 
-    const val FRONTAL_AREA_MIN = 0.045f
+    const val FRONTAL_AREA_MIN = 0.032f
 
     val allowedCategories: List<String> = listOf(
         "person",
@@ -173,10 +173,18 @@ object PedestrianObjectMapper {
         }
     }
 
+    fun isHighPriority(category: String): Boolean {
+        return when (category.trim().lowercase()) {
+            "person", "car", "truck", "bus", "motorcycle", "bicycle", "dog" -> true
+            else -> false
+        }
+    }
+
     fun pickPrimary(detections: List<PedestrianDetection>): PedestrianDetection? {
         if (detections.isEmpty()) return null
         return detections.maxWithOrNull(
             compareBy<PedestrianDetection> { if (it.isFrontal) 1 else 0 }
+                .thenBy { if (isHighPriority(it.category)) 1 else 0 }
                 .thenBy { priority[it.category] ?: 0 }
                 .thenBy { it.areaRatio }
                 .thenBy { it.score },
@@ -187,7 +195,8 @@ object PedestrianObjectMapper {
         val frontal = detections.filter { it.isFrontal }
         if (frontal.isEmpty()) return 0f
         val best = frontal.maxOf { it.areaRatio }
-        return ((best - FRONTAL_AREA_MIN) / 0.18f).coerceIn(0f, 1f)
-            .let { 0.28f + it * 0.72f }
+        // Menos agresivo: solo sube pitidos con obstáculo frontal grande.
+        return ((best - FRONTAL_AREA_MIN) / 0.22f).coerceIn(0f, 1f)
+            .let { 0.18f + it * 0.55f }
     }
 }

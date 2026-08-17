@@ -463,7 +463,7 @@ class PathGuideController @Inject constructor(
                 currentMode == PathGuideMode.PASEO ||
                 currentMode == PathGuideMode.RUTA
 
-            // Navegación / ruta: pitidos L/R + refuerzo si MediaPipe ve obstáculo frontal.
+            // Navegación / ruta: menos pitidos (solo desvíos claros); MediaPipe refuerza voz, no tono continuo.
             if (!spatialBeepsEnabled(currentMode)) {
                 stereoBeepEngine.update(0f, 0f)
                 stereoBeepEngine.setPaused(true)
@@ -471,20 +471,29 @@ class PathGuideController @Inject constructor(
                 brain.outdoorPhase != OutdoorNavPhase.DRIFT_WARNING &&
                 brain.sidewalkAlignment != SidewalkAlignment.ON_ROAD &&
                 brain.sidewalkAlignment != SidewalkAlignment.DRIFTING_TO_ROAD &&
-                brain.leftBeep < 0.05f && brain.rightBeep < 0.05f &&
-                liveObjectDetector.frontalBeepBoost() < 0.22f
+                brain.leftBeep < 0.12f && brain.rightBeep < 0.12f &&
+                liveObjectDetector.frontalBeepBoost() < 0.45f
             ) {
                 stereoBeepEngine.update(0f, 0f)
             } else if (brain.isExitGuiding || streetMode || currentMode == PathGuideMode.GRABANDO) {
+                val navCalm = currentMode == PathGuideMode.NAVEGACION ||
+                    currentMode == PathGuideMode.RUTA
+                val leftOut = if (navCalm) attenuateNavBeep(brain.leftBeep) else brain.leftBeep
+                val rightOut = if (navCalm) attenuateNavBeep(brain.rightBeep) else brain.rightBeep
+                val strongWarning = brain.warningMode ||
+                    brain.outdoorPhase == OutdoorNavPhase.DRIFT_WARNING ||
+                    brain.sidewalkAlignment == SidewalkAlignment.ON_ROAD
                 pushStereoBeeps(
-                    brain.leftBeep,
-                    brain.rightBeep,
-                    doorwayMode = true, // umbral más sensible para guía
-                    continuousTone = brain.continuousTone ||
-                        brain.leftBeep >= 0.50f ||
-                        brain.rightBeep >= 0.50f,
-                    warningMode = brain.warningMode,
-                    guidanceMode = brain.guidanceMode,
+                    leftOut,
+                    rightOut,
+                    doorwayMode = !navCalm && brain.doorwayMode,
+                    continuousTone = strongWarning ||
+                        (!navCalm && (brain.continuousTone ||
+                            brain.leftBeep >= 0.55f ||
+                            brain.rightBeep >= 0.55f)),
+                    warningMode = strongWarning,
+                    guidanceMode = !navCalm && brain.guidanceMode,
+                    navCalm = navCalm,
                 )
             }
 
@@ -731,6 +740,12 @@ class PathGuideController @Inject constructor(
         return navigationAudioCoordinator.canPathGuideSpeak(urgent)
     }
 
+    private fun attenuateNavBeep(raw: Float): Float {
+        // En navegación: silencio hasta desvío claro; luego intensidad reducida.
+        if (raw < NAV_BEEP_FLOOR) return 0f
+        return ((raw - NAV_BEEP_FLOOR) / (1f - NAV_BEEP_FLOOR) * 0.72f).coerceIn(0f, 0.85f)
+    }
+
     private fun pushStereoBeeps(
         left: Float,
         right: Float,
@@ -738,17 +753,22 @@ class PathGuideController @Inject constructor(
         continuousTone: Boolean = false,
         warningMode: Boolean = false,
         guidanceMode: Boolean = false,
+        navCalm: Boolean = false,
     ) {
         var l = left
         var r = right
         var warning = warningMode
         var continuous = continuousTone
         val boost = liveObjectDetector.frontalBeepBoost()
-        if (boost >= 0.22f) {
-            l = maxOf(l, boost)
-            r = maxOf(r, boost)
-            warning = true
-            continuous = true
+        // MediaPipe: refuerzo de pitido solo si el obstáculo frontal es claro (evita tono continuo constante).
+        if (boost >= if (navCalm) 0.55f else 0.35f) {
+            val applied = if (navCalm) boost * 0.55f else boost
+            l = maxOf(l, applied)
+            r = maxOf(r, applied)
+            if (boost >= 0.70f) {
+                warning = true
+                continuous = true
+            }
         }
         val biased = applyNavigationTurnBias(l, r)
         stereoBeepEngine.update(
@@ -915,6 +935,8 @@ class PathGuideController @Inject constructor(
         private const val TAG = "PathGuideController"
         private const val DEBUG_FRAME_MS = 200L
         private const val RECORDING_FLUSH_MS = 8_000L
+        /** En navegación, no pitar por drift leve del corredor. */
+        private const val NAV_BEEP_FLOOR = 0.28f
         private val STREET_URGENT_CUES = setOf(
             "outdoor_crosswalk",
             "outdoor_cross_search",

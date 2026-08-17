@@ -222,8 +222,8 @@ class MediaPipeLiveObjectDetector @Inject constructor(
     companion object {
         private const val TAG = "MpObjectDetector"
         const val MODEL_ASSET = "efficientdet_lite0.tflite"
-        private const val SCORE_THRESHOLD = 0.38f
-        private const val MIN_INTERVAL_MS = 160L
-        private const val INPUT_MAX_SIDE = 320
+        private const val SCORE_THRESHOLD = 0.28f
+        private const val MIN_INTERVAL_MS = 100L
+        private const val INPUT_MAX_SIDE = 416
     }
 }
